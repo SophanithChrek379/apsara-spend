@@ -30,6 +30,18 @@ export default function RootLayout({
       <head>
         {/* iOS PWA home-screen icon */}
         <link rel="apple-touch-icon" href="/icon-192.png" />
+
+        {/* E1 — Font preconnect: establishes early connection to Google Fonts
+            so the browser starts the DNS + TLS handshake before the CSS is
+            parsed. Prevents a waterfall delay on first load.               */}
+        <link rel="preconnect" href="https://fonts.googleapis.com" />
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
+
+        {/* E1 — Font stylesheet with display=swap */}
+        <link
+          rel="stylesheet"
+          href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Open+Sans:wght@400;500;600&family=Poppins:wght@600;700;800&display=swap"
+        />
       </head>
       <body style={{ margin: 0, padding: 0, background: "#080b10" }}>
         {children}
