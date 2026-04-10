@@ -45,6 +45,14 @@ export default function RootLayout({
       </head>
       <body style={{ margin: 0, padding: 0, background: "#080b10" }}>
         {children}
+        {/* W2 — Service worker registration: SSR-safe, runs only in browser after load */}
+        <script dangerouslySetInnerHTML={{ __html: `
+          if ('serviceWorker' in navigator) {
+            window.addEventListener('load', function() {
+              navigator.serviceWorker.register('/sw.js').catch(function() {});
+            });
+          }
+        `}} />
       </body>
     </html>
   );
