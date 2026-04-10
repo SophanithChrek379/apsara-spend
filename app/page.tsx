@@ -47,10 +47,10 @@ const STORAGE_KEY    = "apsara_spend_v2";
 const MONTHS         = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
 const MONTH_FULL     = ["January","February","March","April","May","June","July","August","September","October","November","December"];
 
-// § 5  Contrast-safe tertiary colour (≥ 4.5:1 on #080b10 and #0f131a)
-// #334155 = 3.1:1 — fails WCAG AA at 11px → replaced with #475569 = 4.8:1 ✓
-const TEXT_TERTIARY  = "#475569";
-const TEXT_GHOST     = "#1e2a38"; // intentionally below threshold — decorative only
+// Legacy constants kept for any remaining direct references.
+// All style values now use CSS vars: var(--color-text-lo) and var(--color-text-ghost).
+const TEXT_TERTIARY = "#94a3b8"; // updated to 7.7:1 dark-bg contrast (K1)
+const TEXT_GHOST    = "#475569"; // decorative only — intentionally below AA threshold
 
 const CATEGORIES: { id: CategoryId; label: string; Icon: IconComp; color: string }[] = [
   { id: "food",    label: "Food",    Icon: UtensilsCrossed, color: "#fb923c" },
@@ -58,7 +58,7 @@ const CATEGORIES: { id: CategoryId; label: string; Icon: IconComp; color: string
   { id: "bills",   label: "Bills",   Icon: Zap,             color: "#c084fc" },
   { id: "social",  label: "Social",  Icon: Users,           color: "#34d399" },
   { id: "shop",    label: "Shop",    Icon: ShoppingBag,     color: "#f472b6" },
-  { id: "misc",    label: "Misc",    Icon: MoreHorizontal,  color: "#94a3b8" },
+  { id: "misc",    label: "Misc",    Icon: MoreHorizontal,  color: "var(--color-text-lo)" },
 ];
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -209,7 +209,7 @@ function BudgetBar({ total, monthBudget, onSetBudget }: {
   if (monthBudget <= 0) {
     return (
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: 4 }}>
-        <span style={{ fontSize: 12, color: TEXT_TERTIARY, fontFamily: "var(--font-body)" }}>
+        <span style={{ fontSize: 12, color: "var(--color-text-lo)", fontFamily: "var(--font-body)" }}>
           No budget set for this month
         </span>
         <button
@@ -235,12 +235,12 @@ function BudgetBar({ total, monthBudget, onSetBudget }: {
   return (
     <div>
       <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8 }}>
-        <span style={{ fontSize: 11, color: TEXT_TERTIARY, letterSpacing: "0.12em", textTransform: "uppercase", fontFamily: "var(--font-body)", fontWeight: 600 }}>
+        <span style={{ fontSize: 11, color: "var(--color-text-lo)", letterSpacing: "0.12em", textTransform: "uppercase", fontFamily: "var(--font-body)", fontWeight: 600 }}>
           Budget
         </span>
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
           {total > 0 && (
-            <span style={{ fontSize: 11, fontWeight: 600, color: TEXT_TERTIARY, fontFamily: "var(--font-mono)" }}>
+            <span style={{ fontSize: 11, fontWeight: 600, color: "var(--color-text-lo)", fontFamily: "var(--font-mono)" }}>
               {pctDisplay}%
             </span>
           )}
@@ -249,7 +249,7 @@ function BudgetBar({ total, monthBudget, onSetBudget }: {
           </span>
         </div>
       </div>
-      <div style={{ background: "#0d1117", borderRadius: 999, height: 7, overflow: "hidden" }}>
+      <div style={{ background: "var(--color-bg-input)", borderRadius: 999, height: 7, overflow: "hidden" }}>
         <motion.div
           animate={{ width: `${pct}%` }}
           transition={{ duration: 0.5, ease: [0.4, 0, 0.2, 1] }}
@@ -257,8 +257,8 @@ function BudgetBar({ total, monthBudget, onSetBudget }: {
         />
       </div>
       <div style={{ display: "flex", justifyContent: "space-between", marginTop: 8 }}>
-        <span style={{ fontSize: 11, color: TEXT_TERTIARY, fontFamily: "var(--font-body)" }}>$0</span>
-        <span style={{ fontSize: 11, color: TEXT_TERTIARY, fontFamily: "var(--font-body)" }}>
+        <span style={{ fontSize: 11, color: "var(--color-text-lo)", fontFamily: "var(--font-body)" }}>$0</span>
+        <span style={{ fontSize: 11, color: "var(--color-text-lo)", fontFamily: "var(--font-body)" }}>
           ${monthBudget.toFixed(0)}
         </span>
       </div>
@@ -349,18 +349,18 @@ function MonthPicker({ current, onSelect, onClose }: {
         initial={{ scale: 0.92, opacity: 0, y: 16 }} animate={{ scale: 1, opacity: 1, y: 0 }}
         exit={{ scale: 0.92, opacity: 0, y: 16 }}
         transition={{ type: "spring", damping: 22, stiffness: 300 }}
-        style={{ background: "#141920", borderRadius: 24, padding: "28px 28px", border: "1px solid #1e2a38", width: "100%", maxWidth: 340 }}
+        style={{ background: "var(--color-bg-nav)", borderRadius: 24, padding: "28px 28px", border: "1px solid var(--color-border-mid)", width: "100%", maxWidth: 340 }}
         onClick={(e) => e.stopPropagation()}
       >
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}>
           <button aria-label="Previous year" onClick={() => setPickerYear((y) => y - 1)}
-            style={{ background: "#1e2530", border: "none", borderRadius: 10, padding: 10, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}>
+            style={{ background: "var(--color-bg-nav)", border: "none", borderRadius: 10, padding: 10, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}>
             <ChevronLeft className="icon-nav" color="#94a3b8" strokeWidth={2} />
           </button>
-          <span style={{ fontSize: 20, fontWeight: 600, color: "#f8fafc", letterSpacing: "-0.01em", fontFamily: "var(--font-headline)" }}>{pickerYear}</span>
+          <span style={{ fontSize: 20, fontWeight: 600, color: "var(--color-text-hi)", letterSpacing: "-0.01em", fontFamily: "var(--font-headline)" }}>{pickerYear}</span>
           <button aria-label="Next year" onClick={() => setPickerYear((y) => y + 1)} disabled={atMax}
             style={{ background: atMax ? "#111" : "#1e2530", border: "none", borderRadius: 10, padding: 10, cursor: atMax ? "default" : "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}>
-            <ChevronRight className="icon-nav" color={atMax ? TEXT_GHOST : "#94a3b8"} strokeWidth={2} />
+            <ChevronRight className="icon-nav" color={atMax ? "var(--color-text-ghost)" : "#94a3b8"} strokeWidth={2} />
           </button>
         </div>
         <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 8 }}>
@@ -373,7 +373,7 @@ function MonthPicker({ current, onSelect, onClose }: {
                   padding: "11px 4px", borderRadius: 12, position: "relative",
                   border: isSelected ? "2px solid var(--accent)" : "1px solid transparent",
                   background: isSelected ? "var(--accent-muted)" : isToday ? "#1e2a38" : "transparent",
-                  color: isFuture ? TEXT_GHOST : isSelected ? "var(--accent)" : "#cbd5e1",
+                  color: isFuture ? "var(--color-text-ghost)" : isSelected ? "var(--accent)" : "#cbd5e1",
                   fontFamily: "var(--font-body)",
                   fontWeight: isSelected ? 600 : 400, fontSize: 13, cursor: isFuture ? "default" : "pointer", transition: "all 0.15s",
                 }}>
@@ -427,10 +427,13 @@ function EntryModal({ tx, selectedMonth, monthBalance, totalUSD: currentTotal, o
   useEffect(() => { setTimeout(() => amountRef.current?.focus(), 120); }, []);
   useFocusTrap(modalRef, true);
 
-  // § 2  Clear hint when switching currency
+  // §4 Edit Persistence — switching currency tab NEVER resets or converts the amount.
+  // The user explicitly requested: "keep it as it is, only need user typing to change."
+  // Rationale: auto-conversion creates confusion (rounding, back-and-forth drift).
+  // The field stays exactly as typed; user clears and re-types if they want a different value.
   const handleCurrencyChange = (c: Currency) => {
+    if (c === currency) return;
     setCurrency(c);
-    setRawAmount("");
     setKhrHint(false);
   };
 
@@ -513,23 +516,23 @@ function EntryModal({ tx, selectedMonth, monthBalance, totalUSD: currentTotal, o
         ref={modalRef}
         initial={{ y: "100%" }} animate={{ y: 0 }} exit={{ y: "100%" }}
         transition={{ type: "spring", damping: 28, stiffness: 300 }}
-        style={{ background: "#0f131a", borderRadius: "24px 24px 0 0", padding: "28px 28px 44px", width: "100%", border: "1px solid #1e2a38", borderBottom: "none", maxWidth: 480, margin: "0 auto" }}
+        style={{ background: "var(--color-bg-card)", borderRadius: "24px 24px 0 0", padding: "28px 28px 44px", width: "100%", border: "1px solid var(--color-border-mid)", borderBottom: "none", maxWidth: 480, margin: "0 auto" }}
         onClick={(e) => e.stopPropagation()}
       >
-        <div style={{ width: 40, height: 4, background: "#1e2a38", borderRadius: 2, margin: "0 auto 24px" }} />
+        <div style={{ width: 40, height: 4, background: "var(--color-border-mid)", borderRadius: 2, margin: "0 auto 24px" }} />
 
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
-          <span style={{ fontSize: 22, fontWeight: 600, color: "#f8fafc", letterSpacing: "-0.01em", fontFamily: "var(--font-headline)", lineHeight: 1.2 }}>
+          <span style={{ fontSize: 22, fontWeight: 600, color: "var(--color-text-hi)", letterSpacing: "-0.01em", fontFamily: "var(--font-headline)", lineHeight: 1.2 }}>
             {isEdit ? "Edit Expense" : "New Expense"}
           </span>
           <button aria-label="Close" onClick={onClose}
-            style={{ background: "#1e2530", border: "none", borderRadius: 9, padding: 9, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", minWidth: 36, minHeight: 36 }}>
+            style={{ background: "var(--color-bg-nav)", border: "none", borderRadius: 9, padding: 9, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", minWidth: 36, minHeight: 36 }}>
             <X className="icon-nav" color="#64748b" strokeWidth={2} />
           </button>
         </div>
 
         {/* Currency toggle */}
-        <div style={{ display: "flex", background: "#0d1117", borderRadius: 12, padding: 4, marginBottom: 16, gap: 4 }}>
+        <div style={{ display: "flex", background: "var(--color-bg-input)", borderRadius: 12, padding: 4, marginBottom: 16, gap: 4 }}>
           {(["USD", "KHR"] as Currency[]).map((c) => (
             <button key={c} onClick={() => handleCurrencyChange(c)}
               style={{
@@ -537,7 +540,7 @@ function EntryModal({ tx, selectedMonth, monthBalance, totalUSD: currentTotal, o
                 fontFamily: "var(--font-body)",
                 fontWeight: 600, fontSize: 14, letterSpacing: "0.04em", transition: "all 0.18s",
                 background: currency === c ? "var(--accent)" : "transparent",
-                color:      currency === c ? "#0d0f14" : TEXT_TERTIARY,
+                color:      currency === c ? "#0d0f14" : "var(--color-text-lo)",
               }}>
               {c === "USD" ? "$ USD" : "៛ KHR"}
             </button>
@@ -570,10 +573,10 @@ function EntryModal({ tx, selectedMonth, monthBalance, totalUSD: currentTotal, o
             placeholder={currency === "USD" ? "0.00" : "0"}
             style={{
               width: "100%", boxSizing: "border-box",
-              background: "#0d1117", border: `2px solid ${borderColor}`,
+              background: "var(--color-bg-input)", border: `2px solid ${borderColor}`,
               borderRadius: 14,
               padding: rawAmount ? "16px 44px 16px 50px" : "16px 16px 16px 50px",
-              fontSize: amountFontSize, fontWeight: 800, color: "#f8fafc", outline: "none",
+              fontSize: amountFontSize, fontWeight: 800, color: "var(--color-text-hi)", outline: "none",
               fontFamily: "var(--font-mono)",
               transition: "border-color 0.2s, font-size 0.12s ease",
             }}
@@ -587,7 +590,7 @@ function EntryModal({ tx, selectedMonth, monthBalance, totalUSD: currentTotal, o
               onClick={() => { setRawAmount(""); setKhrHint(false); amountRef.current?.focus(); }}
               style={{
                 position: "absolute", right: 12, top: "50%", transform: "translateY(-50%)",
-                background: "#1e2530", border: "none", borderRadius: 6, padding: 5,
+                background: "var(--color-bg-nav)", border: "none", borderRadius: 6, padding: 5,
                 cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center",
                 zIndex: 2, minWidth: 28, minHeight: 28,
               }}
@@ -642,7 +645,7 @@ function EntryModal({ tx, selectedMonth, monthBalance, totalUSD: currentTotal, o
           placeholder="Note (optional, max 100 chars)..."
           maxLength={100}
           className="focus-input"
-          style={{ width: "100%", boxSizing: "border-box", background: "#0d1117", border: "1.5px solid #1e2a38", borderRadius: 12, padding: "12px 16px", fontSize: 16, fontFamily: "var(--font-body)", lineHeight: 1.5, color: "#94a3b8", outline: "none", marginBottom: 16 }}
+          style={{ width: "100%", boxSizing: "border-box", background: "var(--color-bg-input)", border: "1.5px solid #1e2a38", borderRadius: 12, padding: "12px 16px", fontSize: 16, fontFamily: "var(--font-body)", lineHeight: 1.5, color: "var(--color-text-lo)", outline: "none", marginBottom: 16 }}
         />
 
         {/* ── Date picker — article technique: full-area transparent overlay ──
@@ -660,7 +663,7 @@ function EntryModal({ tx, selectedMonth, monthBalance, totalUSD: currentTotal, o
           <div
             style={{
               display: "flex", alignItems: "center",
-              background: "#0d1117",
+              background: "var(--color-bg-input)",
               border: "1.5px solid #1e2a38",
               borderRadius: 12,
               padding: "14px 16px",
@@ -673,7 +676,7 @@ function EntryModal({ tx, selectedMonth, monthBalance, totalUSD: currentTotal, o
               fontSize: 16,
               fontFamily: "var(--font-body)",
               lineHeight: 1,
-              color: date ? "#e2e8f0" : TEXT_TERTIARY,
+              color: date ? "#e2e8f0" : "var(--color-text-lo)",
             }}>
               {date ? formatDisplayDate(date) : "Select date"}
             </span>
@@ -723,11 +726,11 @@ function EntryModal({ tx, selectedMonth, monthBalance, totalUSD: currentTotal, o
                   display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
                   padding: "10px 2px 8px", borderRadius: 12, gap: 4,
                   border:     active ? `2px solid ${c.color}` : "2px solid transparent",
-                  background: active ? `${c.color}18` : "#0d1117",
+                  background: active ? `${c.color}18` : "var(--color-bg-input)",
                   cursor: "pointer", transition: "all 0.15s", minHeight: 60,
                 }}>
-                <c.Icon className="icon-cat" color={active ? c.color : TEXT_TERTIARY} strokeWidth={1.8} />
-                <span style={{ fontSize: 10, color: active ? c.color : TEXT_TERTIARY, fontWeight: 700, fontFamily: "var(--font-body)", letterSpacing: "0.05em" }}>
+                <c.Icon className="icon-cat" color={active ? c.color : "var(--color-text-lo)"} strokeWidth={1.8} />
+                <span style={{ fontSize: 10, color: active ? c.color : "var(--color-text-lo)", fontWeight: 700, fontFamily: "var(--font-body)", letterSpacing: "0.05em" }}>
                   {c.label.toUpperCase()}
                 </span>
               </button>
@@ -769,7 +772,7 @@ function EntryModal({ tx, selectedMonth, monthBalance, totalUSD: currentTotal, o
           )}
           {deleteConfirm && (
             <button onClick={() => setDeleteConfirm(false)}
-              style={{ padding: "14px 16px", borderRadius: 14, border: "1px solid #1e2a38", background: "#1e2530", color: "#94a3b8", cursor: "pointer", fontSize: 14, fontFamily: "var(--font-body)" }}>
+              style={{ padding: "14px 16px", borderRadius: 14, border: "1px solid var(--color-border-mid)", background: "var(--color-bg-nav)", color: "var(--color-text-lo)", cursor: "pointer", fontSize: 14, fontFamily: "var(--font-body)" }}>
               Cancel
             </button>
           )}
@@ -873,15 +876,16 @@ export default function ApsaraSpendPage() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // R1 — Body scroll lock: prevent background page scroll while any bottom-sheet
-  // or overlay modal is open. Critical on iOS where overscroll-behavior alone
-  // does not prevent rubber-band scrolling of the page behind a fixed overlay.
+  // R1 / S2 — Body scroll lock: prevent background scroll while any modal is open,
+  // and also while the non-scrolling init screen is active (spec §1 & §5).
+  // Note: use inline balance check to avoid hoisting conflict with isBalanceLocked.
   useEffect(() => {
     const anyOpen = showModal || showSettings || showPicker || showBudgetModal;
-    document.body.style.overflow = anyOpen ? "hidden" : "";
-    // Cleanup: always restore on unmount so no orphaned lock remains
+    const nobudget = !(selectedMonth in data.monthlyBalances && data.monthlyBalances[selectedMonth] > 0);
+    const initActive = isLoaded && nobudget;
+    document.body.style.overflow = (anyOpen || initActive) ? "hidden" : "";
     return () => { document.body.style.overflow = ""; };
-  }, [showModal, showSettings, showPicker, showBudgetModal]);
+  }, [showModal, showSettings, showPicker, showBudgetModal, isLoaded, selectedMonth, data.monthlyBalances]);
 
   // ── Derived ──────────────────────────────────────────────────────────────────
   // E2: useMemo — these are the most expensive derivations in the component.
@@ -1020,32 +1024,32 @@ export default function ApsaraSpendPage() {
   // the ~50px dark gap that two separate cards with full padding create between
   // the budget bar labels and the BREAKDOWN eyebrow on mobile.
   const SummaryBreakdownCard = (
-    <div style={{ background: "#0f131a", borderRadius: 22, border: "1px solid #1a2333", overflow: "hidden" }}>
+    <div style={{ background: "var(--color-bg-card)", borderRadius: 22, border: "1px solid var(--color-border)", overflow: "hidden", display: "flex", flexDirection: "column" }}>
 
       {/* ── Summary section ── */}
       <div style={{ padding: "28px 28px 22px" }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", marginBottom: 16 }}>
           <div>
-            <div style={{ fontSize: 11, color: TEXT_TERTIARY, letterSpacing: "0.14em", textTransform: "uppercase", marginBottom: 8, fontFamily: "var(--font-body)", fontWeight: 600 }}>
+            <div style={{ fontSize: 11, color: "var(--color-text-lo)", letterSpacing: "0.14em", textTransform: "uppercase", marginBottom: 8, fontFamily: "var(--font-body)", fontWeight: 600 }}>
               Total Spent
             </div>
-            <div style={{ fontSize: 36, fontWeight: 800, letterSpacing: "-0.03em", color: "#f8fafc", lineHeight: 1, fontFamily: "var(--font-headline)" }}>
+            <div style={{ fontSize: 36, fontWeight: 800, letterSpacing: "-0.03em", color: "var(--color-text-hi)", lineHeight: 1, fontFamily: "var(--font-headline)" }}>
               {currency === "KHR"
                 ? `${Math.round(totalUSD * EXCHANGE_RATE).toLocaleString()} ៛`
                 : `$${totalUSD.toFixed(2)}`}
             </div>
             {/* N3 — period label — makes it unambiguous when time-travelling */}
-            <div style={{ fontSize: 11, color: TEXT_TERTIARY, marginTop: 6, fontFamily: "var(--font-body)", letterSpacing: "0.04em" }}>
+            <div style={{ fontSize: 11, color: "var(--color-text-lo)", marginTop: 6, fontFamily: "var(--font-body)", letterSpacing: "0.04em" }}>
               {MONTH_FULL[month - 1]} {year}
             </div>
           </div>
-          <div style={{ display: "flex", background: "#080b10", borderRadius: 10, padding: 3, gap: 3 }}>
+          <div style={{ display: "flex", background: "var(--color-bg-page)", borderRadius: 10, padding: 3, gap: 3 }}>
             {(["USD", "KHR"] as Currency[]).map((c) => (
               <button key={c} onClick={() => setCurrency(c)}
                 style={{
                   padding: "6px 11px", borderRadius: 7, border: "none", cursor: "pointer",
                   background: currency === c ? "var(--accent)" : "transparent",
-                  color:      currency === c ? "#0d0f14" : TEXT_TERTIARY,
+                  color:      currency === c ? "#0d0f14" : "var(--color-text-lo)",
                   fontWeight: 700, fontSize: 12, fontFamily: "var(--font-body)", letterSpacing: "0.05em", transition: "all 0.18s",
                 }}>
                 {c}
@@ -1065,7 +1069,7 @@ export default function ApsaraSpendPage() {
         <>
           <div style={{ height: 1, background: "#1a2333", margin: "0 24px" }} />
           <div style={{ padding: "22px 28px 28px" }}>
-            <div style={{ fontSize: 11, color: TEXT_TERTIARY, letterSpacing: "0.14em", textTransform: "uppercase", marginBottom: 16, fontFamily: "var(--font-body)", fontWeight: 600 }}>
+            <div style={{ fontSize: 11, color: "var(--color-text-lo)", letterSpacing: "0.14em", textTransform: "uppercase", marginBottom: 16, fontFamily: "var(--font-body)", fontWeight: 600 }}>
               Breakdown
             </div>
             {categoryTotals.filter((c) => c.total > 0).map((c, i) => {
@@ -1077,10 +1081,10 @@ export default function ApsaraSpendPage() {
                   <CategoryIcon cat={c} active />
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4 }}>
-                      <span style={{ fontSize: 14, fontWeight: 600, color: "#cbd5e1", fontFamily: "var(--font-body)" }}>{c.label}</span>
+                      <span style={{ fontSize: 14, fontWeight: 600, color: "var(--color-text-mid)", fontFamily: "var(--font-body)" }}>{c.label}</span>
                       <span style={{ fontSize: 13, fontWeight: 700, color: c.color, fontFamily: "var(--font-mono)" }}>{fmt(c.total)}</span>
                     </div>
-                    <div style={{ background: "#080b10", borderRadius: 999, height: 4, overflow: "hidden" }}>
+                    <div style={{ background: "var(--color-bg-page)", borderRadius: 999, height: 4, overflow: "hidden" }}>
                       <motion.div animate={{ width: `${pct}%` }} transition={{ duration: 0.45, ease: [0.4, 0, 0.2, 1] }}
                         style={{ height: "100%", background: c.color, borderRadius: 999 }} />
                     </div>
@@ -1095,7 +1099,7 @@ export default function ApsaraSpendPage() {
   );
 
   const EmptyState = (
-    <div style={{ textAlign: "center", padding: "56px 28px", background: "#0f131a", borderRadius: 22, border: "1px solid #1a2333", height: "100%", minHeight: 220, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center" }}>
+    <div style={{ textAlign: "center", padding: "56px 28px", background: "var(--color-bg-card)", borderRadius: 22, border: "1px solid var(--color-border)", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center" }}>
 
       {/* Inline SVG — undraw-style empty wallet illustration              */}
       {/* Colours: amber #fbbf24, slate body #1e2a38, surface #141920      */}
@@ -1110,11 +1114,11 @@ export default function ApsaraSpendPage() {
         {/* Wallet body */}
         <rect x="8" y="28" width="88" height="44" rx="8" fill="#1e2a38" />
         {/* Wallet flap */}
-        <path d="M8 36 Q8 28 16 28 H80 Q88 28 88 36 V44 H8 Z" fill="#141920" />
+        <path d="M8 36 Q8 28 16 28 H80 Q88 28 88 36 V44 H8 Z" fill="var(--color-bg-nav)" />
         {/* Flap fold line */}
         <line x1="8" y1="44" x2="88" y2="44" stroke="#2d3f55" strokeWidth="1" />
         {/* Card slot inside wallet */}
-        <rect x="16" y="50" width="40" height="14" rx="3" fill="#141920" stroke="#2d3f55" strokeWidth="1" />
+        <rect x="16" y="50" width="40" height="14" rx="3" fill="var(--color-bg-nav)" stroke="#2d3f55" strokeWidth="1" />
         {/* Card shine */}
         <rect x="20" y="54" width="12" height="2" rx="1" fill="#2d3f55" />
         {/* Amber coin — hovering above wallet, signalling emptiness */}
@@ -1130,8 +1134,8 @@ export default function ApsaraSpendPage() {
         <line x1="62" y1="58" x2="74" y2="58" stroke="#2d3f55" strokeWidth="1.5" strokeLinecap="round" strokeDasharray="3 2" />
       </svg>
 
-      <div style={{ fontSize: 16, fontWeight: 600, color: TEXT_TERTIARY, fontFamily: "var(--font-body)", lineHeight: 1.4 }}>No expenses yet for {MONTH_FULL[month - 1]}</div>
-      <div style={{ fontSize: 12, marginTop: 6, color: TEXT_GHOST, fontFamily: "var(--font-body)", lineHeight: 1.5 }}>Tap + Add Expense to get started</div>
+      <div style={{ fontSize: 16, fontWeight: 600, color: "var(--color-text-lo)", fontFamily: "var(--font-body)", lineHeight: 1.4 }}>No expenses yet for {MONTH_FULL[month - 1]}</div>
+      <div style={{ fontSize: 12, marginTop: 6, color: "var(--color-text-ghost)", fontFamily: "var(--font-body)", lineHeight: 1.5 }}>Tap + Add Expense to get started</div>
     </div>
   );
 
@@ -1145,11 +1149,11 @@ export default function ApsaraSpendPage() {
   );
 
   const TransactionList = hasData ? (
-    <div style={{ background: "#0f131a", borderRadius: 22, padding: "28px 28px", border: "1px solid #1a2333", height: "100%" }}>
+    <div style={{ background: "var(--color-bg-card)", borderRadius: 22, padding: "28px 28px", border: "1px solid var(--color-border)", display: "flex", flexDirection: "column" }}>
 
       {/* ── Header row: count label + category filter dropdown ── */}
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}>
-        <div style={{ fontSize: 11, color: TEXT_TERTIARY, letterSpacing: "0.14em", textTransform: "uppercase", fontFamily: "var(--font-body)", fontWeight: 600 }}>
+        <div style={{ fontSize: 11, color: "var(--color-text-lo)", letterSpacing: "0.14em", textTransform: "uppercase", fontFamily: "var(--font-body)", fontWeight: 600 }}>
           {filterCategory === "all"
             ? `${monthTxs.length} ${monthTxs.length === 1 ? "entry" : "entries"}`
             : `${filteredTxs.length} of ${monthTxs.length}`}
@@ -1162,7 +1166,7 @@ export default function ApsaraSpendPage() {
             onClick={() => setShowFilterMenu((v) => !v)}
             style={{
               display: "flex", alignItems: "center", gap: 6,
-              background: filterCategory !== "all" ? `${activeCat?.color}18` : "#141920",
+              background: filterCategory !== "all" ? `${activeCat?.color}18` : "var(--color-bg-nav)",
               border: filterCategory !== "all" ? `1px solid ${activeCat?.color}40` : "1px solid #1e2a38",
               borderRadius: 8, padding: "5px 10px",
               cursor: "pointer", transition: "all 0.15s",
@@ -1175,12 +1179,12 @@ export default function ApsaraSpendPage() {
                 strokeWidth={2}
               />
             )}
-            <span style={{ fontSize: 11, fontWeight: 600, color: filterCategory !== "all" ? activeCat?.color : TEXT_TERTIARY, fontFamily: "var(--font-body)", letterSpacing: "0.04em" }}>
+            <span style={{ fontSize: 11, fontWeight: 600, color: filterCategory !== "all" ? activeCat?.color : "var(--color-text-lo)", fontFamily: "var(--font-body)", letterSpacing: "0.04em" }}>
               {filterCategory === "all" ? "All" : activeCat?.label}
             </span>
             <ChevronDown
               size={11}
-              color={filterCategory !== "all" ? activeCat?.color : TEXT_TERTIARY}
+              color={filterCategory !== "all" ? activeCat?.color : "var(--color-text-lo)"}
               strokeWidth={2.5}
               style={{ transition: "transform 0.15s", transform: showFilterMenu ? "rotate(180deg)" : "rotate(0deg)" }}
             />
@@ -1196,7 +1200,7 @@ export default function ApsaraSpendPage() {
                 transition={{ duration: 0.14, ease: [0.4, 0, 0.2, 1] }}
                 style={{
                   position: "absolute", top: "calc(100% + 6px)", right: 0,
-                  background: "#141920", border: "1px solid #1e2a38",
+                  background: "var(--color-bg-nav)", border: "1px solid var(--color-border-mid)",
                   borderRadius: 12, padding: "6px", zIndex: 100,
                   minWidth: 148, boxShadow: "0 8px 24px rgba(0,0,0,0.5)",
                 }}
@@ -1217,7 +1221,7 @@ export default function ApsaraSpendPage() {
                 </button>
 
                 {/* Divider */}
-                <div style={{ height: 1, background: "#1e2a38", margin: "4px 0" }} />
+                <div style={{ height: 1, background: "var(--color-border-mid)", margin: "4px 0" }} />
 
                 {/* Category options — only show categories that have entries */}
                 {CATEGORIES.filter((c) => monthTxs.some((t) => t.category === c.id)).map((c) => (
@@ -1245,7 +1249,7 @@ export default function ApsaraSpendPage() {
 
       {/* ── Transaction rows (filtered) ── */}
       {filteredTxs.length === 0 ? (
-        <div style={{ textAlign: "center", padding: "24px 0", color: TEXT_TERTIARY, fontSize: 13, fontFamily: "var(--font-body)" }}>
+        <div style={{ textAlign: "center", padding: "24px 0", color: "var(--color-text-lo)", fontSize: 13, fontFamily: "var(--font-body)" }}>
           No {activeCat?.label} entries this month
         </div>
       ) : (
@@ -1269,23 +1273,23 @@ export default function ApsaraSpendPage() {
                   background: "none", border: "none",
                   borderBottomWidth: i < filteredTxs.length - 1 ? 1 : 0,
                   borderBottomStyle: "solid" as const,
-                  borderBottomColor: "#0f1520",
+                  borderBottomColor: "var(--color-border)",
                   cursor: "pointer", textAlign: "left",
                 }}>
                 <CategoryIcon cat={cat} active />
                 <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontSize: 14, fontWeight: 600, color: "#e2e8f0", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", lineHeight: 1.5, fontFamily: "var(--font-body)" }}>
+                  <div style={{ fontSize: 14, fontWeight: 600, color: "var(--color-text-mid)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", lineHeight: 1.5, fontFamily: "var(--font-body)" }}>
                     {tx.note}
                   </div>
-                  <div style={{ fontSize: 12, color: TEXT_TERTIARY, marginTop: 4, fontFamily: "var(--font-body)", lineHeight: 1.4 }}>
+                  <div style={{ fontSize: 12, color: "var(--color-text-lo)", marginTop: 4, fontFamily: "var(--font-body)", lineHeight: 1.4 }}>
                     {cat.label} · {dateStr}
                   </div>
                 </div>
                 <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 3 }}>
-                  <span style={{ fontSize: 16, fontWeight: 700, color: "#f8fafc", fontFamily: "var(--font-mono)" }}>
+                  <span style={{ fontSize: 16, fontWeight: 700, color: "var(--color-text-hi)", fontFamily: "var(--font-mono)" }}>
                     {fmt(tx.amountUSD)}
                   </span>
-                  <span style={{ fontSize: 11, color: TEXT_TERTIARY, letterSpacing: "0.06em", fontFamily: "var(--font-body)" }}>EDIT ›</span>
+                  <span style={{ fontSize: 11, color: "var(--color-text-lo)", letterSpacing: "0.06em", fontFamily: "var(--font-body)" }}>EDIT ›</span>
                 </div>
               </motion.button>
             );
@@ -1304,7 +1308,11 @@ export default function ApsaraSpendPage() {
       style={{
         display: "flex", flexDirection: "column", alignItems: "center",
         justifyContent: "center", textAlign: "center",
-        padding: "48px 32px", minHeight: "55vh",
+        padding: "48px 32px",
+        // S2 — non-scrolling: fill the full viewport height, no overflow
+        // The CTA is always visible without the user needing to scroll
+        minHeight: "100dvh",
+        overflow: "hidden",
       }}
     >
       {/* Wallet illustration (reused from EmptyState) */}
@@ -1437,8 +1445,8 @@ export default function ApsaraSpendPage() {
           --color-border-mid:  #1e2a38;
           --color-text-hi:     #f8fafc;
           --color-text-mid:    #cbd5e1;
-          --color-text-lo:     #475569;
-          --color-text-ghost:  #1e2a38;
+          --color-text-lo:     #94a3b8;  /* 7.7:1 on dark bg — WCAG AA ✓ (was #475569 = 2.6:1 ✗) */
+          --color-text-ghost:  #475569;  /* decorative only — swipe hint, dividers                */
         }
         /* ── T1  Light mode: Slate-50 bg, Slate-900 text (WCAG AA) ──────── */
         html[data-theme="light"] {
@@ -1522,9 +1530,10 @@ export default function ApsaraSpendPage() {
 
         /* ── Responsive FAB ─────────────────────────────────────────────── */
         /* safe-area-inset-bottom clears iPhone home indicator               */
-        .fab-btn { position: fixed; bottom: calc(var(--sp-8) + env(safe-area-inset-bottom)); left: var(--sp-4); right: var(--sp-4); width: auto; transform: none; }
+        /* §3 spec: mobile-first max-width 400px, centered with margin auto  */
+        .fab-btn { position: fixed; bottom: calc(var(--sp-8) + env(safe-area-inset-bottom)); left: var(--sp-4); right: var(--sp-4); width: auto; max-width: 400px; margin: 0 auto; transform: none; }
         @media (min-width: 768px) {
-          .fab-btn { left: auto; right: var(--sp-8); width: auto; min-width: 180px; }
+          .fab-btn { left: auto; right: var(--sp-8); max-width: 220px; margin: 0; }
         }
 
         /* ── Date picker — full-width mobile, auto-width on tablet+ ─────── */
@@ -1556,9 +1565,9 @@ export default function ApsaraSpendPage() {
       <main className="main-wrap"
         style={{
           fontFamily: "var(--font-body)",
-          background: "#080b10",
+          background: "var(--color-bg-page)",
           minHeight: "100dvh",
-          color: "#e2e8f0",
+          color: "var(--color-text-mid)",
           position: "relative",
           userSelect: "none",
         }}
@@ -1575,13 +1584,13 @@ export default function ApsaraSpendPage() {
           {/* ════ HEADER ════ */}
           <div className="header-pad" style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
             <div>
-              <div style={{ fontSize: 11, letterSpacing: "0.20em", color: TEXT_TERTIARY, textTransform: "uppercase", marginBottom: 8, fontFamily: "var(--font-body)", fontWeight: 600 }}>
+              <div style={{ fontSize: 11, letterSpacing: "0.20em", color: "var(--color-text-lo)", textTransform: "uppercase", marginBottom: 8, fontFamily: "var(--font-body)", fontWeight: 600 }}>
                 Personal Tracker
               </div>
-              <h1 style={{ fontSize: 32, fontWeight: 800, letterSpacing: "-0.02em", margin: 0, color: "#f8fafc", fontFamily: "var(--font-headline)", lineHeight: 1.1 }}>
+              <h1 style={{ fontSize: 32, fontWeight: 800, letterSpacing: "-0.02em", margin: 0, color: "var(--color-text-hi)", fontFamily: "var(--font-headline)", lineHeight: 1.1 }}>
                 Apsara <span style={{ color: "var(--accent)" }}>Spend</span>
               </h1>
-              <div style={{ fontSize: 11, color: TEXT_TERTIARY, letterSpacing: "0.06em", marginTop: 6, fontFamily: "var(--font-body)", display: "flex", alignItems: "center", gap: 8 }}>
+              <div style={{ fontSize: 11, color: "var(--color-text-lo)", letterSpacing: "0.06em", marginTop: 6, fontFamily: "var(--font-body)", display: "flex", alignItems: "center", gap: 8 }}>
                 1 USD = 4,000 ៛ · Fixed rate
                 {isBalanceLocked(selectedMonth) ? (
                   <span style={{ background: "var(--accent-muted)", border: "1px solid var(--accent-border)", color: "var(--accent)", borderRadius: 99, padding: "1px 8px", fontSize: 10, fontWeight: 600, letterSpacing: "0.06em" }}>
@@ -1596,7 +1605,7 @@ export default function ApsaraSpendPage() {
               </div>
             </div>
             <button aria-label="Open settings" onClick={() => setShowSettings(true)}
-              style={{ background: "#141920", border: "1px solid #1e2a38", borderRadius: 12, padding: 12, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", minWidth: 44, minHeight: 44, marginTop: 4 }}>
+              style={{ background: "var(--color-bg-nav)", border: "1px solid var(--color-border-mid)", borderRadius: 12, padding: 12, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", minWidth: 44, minHeight: 44, marginTop: 4 }}>
               <Settings className="icon-nav" color="#64748b" strokeWidth={1.8} />
             </button>
           </div>
@@ -1604,7 +1613,7 @@ export default function ApsaraSpendPage() {
           {/* ════ MONTH NAV ════ */}
           <div className="monthnav-pad" style={{ display: "flex", alignItems: "center", gap: 12 }}>
             <button aria-label="Previous month" onClick={() => navigateMonth(-1)}
-              style={{ background: "#141920", border: "1px solid #1e2a38", borderRadius: 10, padding: 12, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", minWidth: 44, minHeight: 44 }}>
+              style={{ background: "var(--color-bg-nav)", border: "1px solid var(--color-border-mid)", borderRadius: 10, padding: 12, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", minWidth: 44, minHeight: 44 }}>
               <ChevronLeft className="icon-nav" color="#64748b" strokeWidth={2} />
             </button>
 
@@ -1615,10 +1624,10 @@ export default function ApsaraSpendPage() {
                   initial="enter" animate="center" exit="exit"
                   transition={{ duration: 0.22, ease: [0.4, 0, 0.2, 1] }}
                   style={{ textAlign: "center" }}>
-                  <div style={{ fontSize: 24, fontWeight: 700, color: "#f8fafc", letterSpacing: "-0.01em", fontFamily: "var(--font-headline)", lineHeight: 1.1 }}>
+                  <div style={{ fontSize: 24, fontWeight: 700, color: "var(--color-text-hi)", letterSpacing: "-0.01em", fontFamily: "var(--font-headline)", lineHeight: 1.1 }}>
                     {MONTH_FULL[month - 1]}
                   </div>
-                  <div style={{ fontSize: 13, color: TEXT_TERTIARY, marginTop: 4, fontWeight: 500, fontFamily: "var(--font-body)" }}>
+                  <div style={{ fontSize: 13, color: "var(--color-text-lo)", marginTop: 4, fontWeight: 500, fontFamily: "var(--font-body)" }}>
                     {year}{isCurrentMonth && <span style={{ color: "var(--accent)", fontSize: 11, letterSpacing: "0.08em", marginLeft: 6, fontFamily: "var(--font-body)", fontWeight: 600 }}>● NOW</span>}
                   </div>
                 </motion.div>
@@ -1626,8 +1635,8 @@ export default function ApsaraSpendPage() {
             </button>
 
             <button aria-label="Next month" onClick={() => navigateMonth(1)} disabled={isCurrentMonth}
-              style={{ background: isCurrentMonth ? "transparent" : "#141920", border: isCurrentMonth ? "1px solid #0d1117" : "1px solid #1e2a38", borderRadius: 10, padding: 12, cursor: isCurrentMonth ? "default" : "pointer", display: "flex", alignItems: "center", justifyContent: "center", minWidth: 44, minHeight: 44 }}>
-              <ChevronRight className="icon-nav" color={isCurrentMonth ? TEXT_GHOST : "#64748b"} strokeWidth={2} />
+              style={{ background: isCurrentMonth ? "transparent" : "var(--color-bg-nav)", border: isCurrentMonth ? "1px solid #0d1117" : "1px solid #1e2a38", borderRadius: 10, padding: 12, cursor: isCurrentMonth ? "default" : "pointer", display: "flex", alignItems: "center", justifyContent: "center", minWidth: 44, minHeight: 44 }}>
+              <ChevronRight className="icon-nav" color={isCurrentMonth ? "var(--color-text-ghost)" : "#64748b"} strokeWidth={2} />
             </button>
           </div>
 
@@ -1670,7 +1679,7 @@ export default function ApsaraSpendPage() {
             </AnimatePresence>
           </motion.div>
 
-          <div className="swipe-hint" style={{ textAlign: "center", marginTop: 14, fontSize: 11, color: TEXT_GHOST, letterSpacing: "0.1em", fontFamily: "var(--font-body)" }}>
+          <div className="swipe-hint" style={{ textAlign: "center", marginTop: 14, fontSize: 11, color: "var(--color-text-ghost)", letterSpacing: "0.1em", fontFamily: "var(--font-body)" }}>
             ← SWIPE TO NAVIGATE MONTHS →
           </div>
         </div>
@@ -1693,7 +1702,7 @@ export default function ApsaraSpendPage() {
             background: fabDisabled
               ? "#1e2a38"
               : "linear-gradient(135deg, var(--accent) 0%, var(--accent-dim) 100%)",
-            color: fabDisabled ? TEXT_TERTIARY : "#0d0f14",
+            color: fabDisabled ? "var(--color-text-lo)" : "#0d0f14",
             border: fabDisabled ? "1px solid #2d3748" : "none",
             borderRadius: 20,
             padding: "16px 28px",
@@ -1709,7 +1718,7 @@ export default function ApsaraSpendPage() {
             boxShadow: fabDisabled ? "none" : "0 20px 50px rgba(0,0,0,0.5)",
             transition: "background 0.3s, color 0.3s, opacity 0.3s",
           }}>
-          <Plus size={18} color={fabDisabled ? TEXT_TERTIARY : "#0d0f14"} strokeWidth={3} />
+          <Plus size={18} color={fabDisabled ? "var(--color-text-lo)" : "#0d0f14"} strokeWidth={3} />
           {fabDisabled ? "Budget Reached" : "Add Expense"}
         </motion.button>
         )}{/* end hasMonthBudget FAB gate */}
@@ -1750,22 +1759,22 @@ export default function ApsaraSpendPage() {
               <motion.div ref={budgetModalRef} initial={{ y: "100%" }} animate={{ y: 0 }} exit={{ y: "100%" }}
                 transition={{ type: "spring", damping: 28, stiffness: 300 }}
                 role="dialog" aria-modal="true" aria-label="Set Monthly Budget"
-                style={{ background: "#0f131a", borderRadius: "24px 24px 0 0", padding: "28px 28px 56px", width: "100%", border: "1px solid #1e2a38", borderBottom: "none", maxWidth: 480, margin: "0 auto" }}
+                style={{ background: "var(--color-bg-card)", borderRadius: "24px 24px 0 0", padding: "28px 28px 56px", width: "100%", border: "1px solid var(--color-border-mid)", borderBottom: "none", maxWidth: 480, margin: "0 auto" }}
                 onClick={(e) => e.stopPropagation()}>
 
-                <div style={{ width: 40, height: 4, background: "#1e2a38", borderRadius: 2, margin: "0 auto 24px" }} />
+                <div style={{ width: 40, height: 4, background: "var(--color-border-mid)", borderRadius: 2, margin: "0 auto 24px" }} />
 
                 {/* Header */}
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
-                  <span style={{ fontSize: 22, fontWeight: 600, color: "#f8fafc", fontFamily: "var(--font-headline)", letterSpacing: "-0.01em" }}>
+                  <span style={{ fontSize: 22, fontWeight: 600, color: "var(--color-text-hi)", fontFamily: "var(--font-headline)", letterSpacing: "-0.01em" }}>
                     Set Monthly Budget
                   </span>
                   <button onClick={() => setShowBudgetModal(false)}
-                    style={{ background: "#1e2530", border: "none", borderRadius: 9, padding: 9, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", minWidth: 36, minHeight: 36 }}>
+                    style={{ background: "var(--color-bg-nav)", border: "none", borderRadius: 9, padding: 9, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", minWidth: 36, minHeight: 36 }}>
                     <X className="icon-nav" color="#64748b" strokeWidth={2} />
                   </button>
                 </div>
-                <div style={{ fontSize: 12, color: TEXT_TERTIARY, marginBottom: 24, fontFamily: "var(--font-body)", lineHeight: 1.5 }}>
+                <div style={{ fontSize: 12, color: "var(--color-text-lo)", marginBottom: 24, fontFamily: "var(--font-body)", lineHeight: 1.5 }}>
                   {MONTH_FULL[month - 1]} {year} · Once saved this cannot be changed.
                 </div>
 
@@ -1782,9 +1791,9 @@ export default function ApsaraSpendPage() {
                     autoFocus
                     style={{
                       width: "100%", boxSizing: "border-box",
-                      background: "#0d1117", border: "2px solid #1e2a38",
+                      background: "var(--color-bg-input)", border: "2px solid #1e2a38",
                       borderRadius: 14, padding: "16px 16px 16px 50px",
-                      fontSize: 32, fontWeight: 800, color: "#f8fafc", outline: "none",
+                      fontSize: 32, fontWeight: 800, color: "var(--color-text-hi)", outline: "none",
                       fontFamily: "var(--font-mono)", transition: "border-color 0.2s",
                     }}
                   />
@@ -1813,7 +1822,7 @@ export default function ApsaraSpendPage() {
                     width: "100%", padding: "16px", borderRadius: 16, border: "none",
                     background: !budgetInput || parseFloat(budgetInput) <= 0
                       ? "#1e2a38" : "linear-gradient(135deg, var(--accent) 0%, var(--accent-dim) 100%)",
-                    color: !budgetInput || parseFloat(budgetInput) <= 0 ? TEXT_TERTIARY : "#0d0f14",
+                    color: !budgetInput || parseFloat(budgetInput) <= 0 ? "var(--color-text-lo)" : "#0d0f14",
                     fontSize: 16, fontWeight: 700, fontFamily: "var(--font-headline)",
                     cursor: !budgetInput || parseFloat(budgetInput) <= 0 ? "not-allowed" : "pointer",
                     transition: "all 0.2s",
@@ -1832,35 +1841,35 @@ export default function ApsaraSpendPage() {
               <motion.div ref={settingsModalRef} initial={{ y: "100%" }} animate={{ y: 0 }} exit={{ y: "100%" }}
                 transition={{ type: "spring", damping: 28, stiffness: 280 }}
                 role="dialog" aria-modal="true" aria-label="Settings"
-                style={{ background: "#0f131a", borderRadius: "22px 22px 0 0", padding: "28px 28px 56px", width: "100%", border: "1px solid #1a2333", borderBottom: "none", maxWidth: 480, margin: "0 auto" }}
+                style={{ background: "var(--color-bg-card)", borderRadius: "22px 22px 0 0", padding: "28px 28px 56px", width: "100%", border: "1px solid var(--color-border)", borderBottom: "none", maxWidth: 480, margin: "0 auto" }}
                 onClick={(e) => e.stopPropagation()}>
-                <div style={{ width: 36, height: 4, background: "#1e2a38", borderRadius: 2, margin: "0 auto 24px" }} />
+                <div style={{ width: 36, height: 4, background: "var(--color-border-mid)", borderRadius: 2, margin: "0 auto 24px" }} />
 
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 24 }}>
                   <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                     <Settings className="icon-nav" color="#64748b" strokeWidth={1.8} />
-                    <span style={{ fontSize: 22, fontWeight: 600, color: "#f8fafc", fontFamily: "var(--font-headline)", letterSpacing: "-0.01em" }}>Settings</span>
+                    <span style={{ fontSize: 22, fontWeight: 600, color: "var(--color-text-hi)", fontFamily: "var(--font-headline)", letterSpacing: "-0.01em" }}>Settings</span>
                   </div>
                   <button aria-label="Close settings"
                     onClick={() => { setShowSettings(false); setResetConfirm(false); }}
-                    style={{ background: "#1e2530", border: "none", borderRadius: 9, padding: 9, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", minWidth: 36, minHeight: 36 }}>
+                    style={{ background: "var(--color-bg-nav)", border: "none", borderRadius: 9, padding: 9, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", minWidth: 36, minHeight: 36 }}>
                     <X className="icon-nav" color="#64748b" strokeWidth={2} />
                   </button>
                 </div>
 
                 {/* ── Q5  Theme Mode ── */}
-                <div style={{ fontSize: 11, color: TEXT_TERTIARY, letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: 8, fontFamily: "var(--font-body)", fontWeight: 600 }}>Appearance</div>
-                <div style={{ background: "#080b10", borderRadius: 14, padding: 16, marginBottom: 16 }}>
+                <div style={{ fontSize: 11, color: "var(--color-text-lo)", letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: 8, fontFamily: "var(--font-body)", fontWeight: 600 }}>Appearance</div>
+                <div style={{ background: "var(--color-bg-page)", borderRadius: 14, padding: 16, marginBottom: 16 }}>
                   {/* Theme toggle */}
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
-                    <span style={{ fontSize: 13, fontWeight: 600, color: "#cbd5e1", fontFamily: "var(--font-body)" }}>Theme</span>
-                    <div style={{ display: "flex", background: "#141920", borderRadius: 10, padding: 3, gap: 3 }}>
+                    <span style={{ fontSize: 13, fontWeight: 600, color: "var(--color-text-mid)", fontFamily: "var(--font-body)" }}>Theme</span>
+                    <div style={{ display: "flex", background: "var(--color-bg-nav)", borderRadius: 10, padding: 3, gap: 3 }}>
                       {(["dark", "system", "light"] as const).map((m) => (
                         <button key={m} onClick={() => setThemeMode(m)}
                           style={{
                             padding: "6px 12px", borderRadius: 7, border: "none", cursor: "pointer",
                             background: themeMode === m ? "var(--accent)" : "transparent",
-                            color: themeMode === m ? "var(--accent-text)" : TEXT_TERTIARY,
+                            color: themeMode === m ? "var(--accent-text)" : "var(--color-text-lo)",
                             fontSize: 11, fontWeight: 600, fontFamily: "var(--font-body)",
                             textTransform: "capitalize", transition: "all 0.15s",
                           }}>
@@ -1872,7 +1881,7 @@ export default function ApsaraSpendPage() {
 
                   {/* Q4 — Palette switcher */}
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                    <span style={{ fontSize: 13, fontWeight: 600, color: "#cbd5e1", fontFamily: "var(--font-body)" }}>Accent</span>
+                    <span style={{ fontSize: 13, fontWeight: 600, color: "var(--color-text-mid)", fontFamily: "var(--font-body)" }}>Accent</span>
                     <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
                       {([
                         { id: "yellow",  hex: "#fbbf24" },
@@ -1897,24 +1906,24 @@ export default function ApsaraSpendPage() {
                 </div>
 
                 {/* Static rate info */}
-                <div style={{ background: "#080b10", borderRadius: 12, padding: "12px 16px", marginBottom: 16, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <div style={{ background: "var(--color-bg-page)", borderRadius: 12, padding: "12px 16px", marginBottom: 16, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                   <div>
-                    <div style={{ fontSize: 11, color: TEXT_TERTIARY, letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: 4, fontFamily: "var(--font-body)", fontWeight: 600 }}>Exchange Rate</div>
-                    <div style={{ fontSize: 16, fontWeight: 700, color: "#64748b", fontFamily: "var(--font-mono)" }}>1 USD = 4,000 ៛</div>
+                    <div style={{ fontSize: 11, color: "var(--color-text-lo)", letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: 4, fontFamily: "var(--font-body)", fontWeight: 600 }}>Exchange Rate</div>
+                    <div style={{ fontSize: 16, fontWeight: 700, color: "var(--color-text-lo)", fontFamily: "var(--font-mono)" }}>1 USD = 4,000 ៛</div>
                   </div>
-                  <span style={{ fontSize: 11, background: "#1e2a38", color: TEXT_TERTIARY, padding: "4px 10px", borderRadius: 99, letterSpacing: "0.06em", fontFamily: "var(--font-body)", fontWeight: 600 }}>Fixed</span>
+                  <span style={{ fontSize: 11, background: "var(--color-border-mid)", color: "var(--color-text-lo)", padding: "4px 10px", borderRadius: 99, letterSpacing: "0.06em", fontFamily: "var(--font-body)", fontWeight: 600 }}>Fixed</span>
                 </div>
 
                 {/* Data Management */}
-                <div style={{ fontSize: 11, color: TEXT_TERTIARY, letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: 8, fontFamily: "var(--font-body)", fontWeight: 600 }}>Data Management</div>
-                <div style={{ background: "#080b10", borderRadius: 14, padding: 16 }}>
+                <div style={{ fontSize: 11, color: "var(--color-text-lo)", letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: 8, fontFamily: "var(--font-body)", fontWeight: 600 }}>Data Management</div>
+                <div style={{ background: "var(--color-bg-page)", borderRadius: 14, padding: 16 }}>
                   {!resetConfirm ? (
                     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                       <div>
-                        <div style={{ fontSize: 14, fontWeight: 600, color: "#64748b", fontFamily: "var(--font-body)", lineHeight: 1.4 }}>
+                        <div style={{ fontSize: 14, fontWeight: 600, color: "var(--color-text-lo)", fontFamily: "var(--font-body)", lineHeight: 1.4 }}>
                           Clear {MONTH_FULL[month - 1]} {year} data
                         </div>
-                        <div style={{ fontSize: 12, color: TEXT_TERTIARY, marginTop: 4, fontFamily: "var(--font-body)", lineHeight: 1.5 }}>Removes all entries for this month</div>
+                        <div style={{ fontSize: 12, color: "var(--color-text-lo)", marginTop: 4, fontFamily: "var(--font-body)", lineHeight: 1.5 }}>Removes all entries for this month</div>
                       </div>
                       <button onClick={() => setResetConfirm(true)}
                         style={{ background: "#ef444418", border: "1px solid #ef444440", color: "#ef4444", borderRadius: 9, padding: "8px 14px", cursor: "pointer", fontSize: 13, fontWeight: 600, fontFamily: "var(--font-body)", whiteSpace: "nowrap" }}>
@@ -1928,7 +1937,7 @@ export default function ApsaraSpendPage() {
                       </div>
                       <div style={{ display: "flex", gap: 8 }}>
                         <button onClick={() => setResetConfirm(false)}
-                          style={{ flex: 1, padding: 12, background: "#1e2530", border: "1px solid #2d3748", color: "#94a3b8", borderRadius: 10, cursor: "pointer", fontSize: 14, fontWeight: 600, fontFamily: "var(--font-body)" }}>
+                          style={{ flex: 1, padding: 12, background: "var(--color-bg-nav)", border: "1px solid #2d3748", color: "var(--color-text-lo)", borderRadius: 10, cursor: "pointer", fontSize: 14, fontWeight: 600, fontFamily: "var(--font-body)" }}>
                           Cancel
                         </button>
                         <button onClick={handleResetMonth}
