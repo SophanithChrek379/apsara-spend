@@ -519,7 +519,7 @@ function EntryModal({ tx, selectedMonth, monthBalance, totalUSD: currentTotal, o
 
   const parsedAmt  = currency === "KHR" ? parseInt(rawAmount, 10) || 0 : parseFloat(rawAmount) || 0;
   const previewUSD = toUSD(rawAmount);
-  const borderColor = shake ? "#ef4444" : khrHint ? "#f59e0b" : parsedAmt > 0 ? "var(--accent-border)" : "#1e2a38";
+  const borderColor = shake ? "#ef4444" : khrHint ? "#f59e0b" : parsedAmt > 0 ? "var(--accent-border)" : "var(--color-border)";
 
   // Adaptive font size — shrinks as the display value gets longer to prevent overflow
   const displayVal = currency === "KHR" ? formatKHRDisplay(rawAmount) : rawAmount;
@@ -669,7 +669,7 @@ function EntryModal({ tx, selectedMonth, monthBalance, totalUSD: currentTotal, o
           placeholder="Note (optional, max 100 chars)..."
           maxLength={100}
           className="focus-input"
-          style={{ width: "100%", boxSizing: "border-box", background: "var(--color-bg-input)", border: "1.5px solid #1e2a38", borderRadius: 12, padding: "12px 16px", fontSize: 16, fontFamily: "var(--font-body)", lineHeight: 1.5, color: "var(--color-text-lo)", outline: "none", marginBottom: 16 }}
+          style={{ width: "100%", boxSizing: "border-box", background: "var(--color-bg-input)", border: "1.5px solid var(--color-border)", borderRadius: 12, padding: "12px 16px", fontSize: 16, fontFamily: "var(--font-body)", lineHeight: 1.5, color: "var(--color-text-hi)", outline: "none", marginBottom: 16 }}
         />
 
         {/* ── Date picker — article technique: full-area transparent overlay ──
@@ -688,7 +688,7 @@ function EntryModal({ tx, selectedMonth, monthBalance, totalUSD: currentTotal, o
             style={{
               display: "flex", alignItems: "center",
               background: "var(--color-bg-input)",
-              border: "1.5px solid #1e2a38",
+              border: "1.5px solid var(--color-border)",
               borderRadius: 12,
               padding: "14px 16px",
               minHeight: 48,
@@ -700,7 +700,7 @@ function EntryModal({ tx, selectedMonth, monthBalance, totalUSD: currentTotal, o
               fontSize: 16,
               fontFamily: "var(--font-body)",
               lineHeight: 1,
-              color: date ? "#e2e8f0" : "var(--color-text-lo)",
+              color: "var(--color-text-hi)",
             }}>
               {date ? formatDisplayDate(date) : "Select date"}
             </span>
@@ -1501,6 +1501,14 @@ export default function ApsaraSpendPage() {
         /* Focus ring uses accent var */
         .focus-input:focus { border-color: var(--accent-border) !important; }
 
+        /* Remove browser default focus outline on Settings theme tab buttons */
+        button:focus { outline: none; }
+        button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+        /* Fix 4 — Placeholder text uses --color-text-hi so it reads correctly in light mode */
+        ::placeholder { color: var(--color-text-lo); opacity: 1; }
+        input::placeholder, textarea::placeholder { color: var(--color-text-lo); opacity: 1; }
+
         *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
         html { font-size: 16px; }
         html, body {
@@ -1822,7 +1830,7 @@ export default function ApsaraSpendPage() {
                     autoFocus
                     style={{
                       width: "100%", boxSizing: "border-box",
-                      background: "var(--color-bg-input)", border: "2px solid #1e2a38",
+                      background: "var(--color-bg-input)", border: "2px solid var(--color-border)",
                       borderRadius: 14, padding: "16px 16px 16px 50px",
                       fontSize: 32, fontWeight: 800, color: "var(--color-text-hi)", outline: "none",
                       fontFamily: "var(--font-mono)", transition: "border-color 0.2s",
@@ -1927,7 +1935,7 @@ export default function ApsaraSpendPage() {
                           style={{
                             width: 26, height: 26, borderRadius: "50%",
                             background: hex, border: "none", cursor: "pointer",
-                            boxShadow: palette === id ? `0 0 0 2px #0f131a, 0 0 0 4px ${hex}` : "none",
+                            boxShadow: palette === id ? `0 0 0 2px var(--color-bg-card), 0 0 0 4px ${hex}` : "none",
                             transition: "box-shadow 0.15s",
                           }}
                         />
