@@ -355,12 +355,17 @@ function MonthPicker({ current, onSelect, onClose }: {
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}>
           <button aria-label="Previous year" onClick={() => setPickerYear((y) => y - 1)}
             style={{ background: "var(--color-bg-nav)", border: "none", borderRadius: 10, padding: 10, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}>
-            <ChevronLeft className="icon-nav" color="#94a3b8" strokeWidth={2} />
+            <ChevronLeft className="icon-nav" color="var(--color-text-lo)" strokeWidth={2} />
           </button>
           <span style={{ fontSize: 20, fontWeight: 600, color: "var(--color-text-hi)", letterSpacing: "-0.01em", fontFamily: "var(--font-headline)" }}>{pickerYear}</span>
           <button aria-label="Next year" onClick={() => setPickerYear((y) => y + 1)} disabled={atMax}
-            style={{ background: atMax ? "#111" : "#1e2530", border: "none", borderRadius: 10, padding: 10, cursor: atMax ? "default" : "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}>
-            <ChevronRight className="icon-nav" color={atMax ? "var(--color-text-ghost)" : "#94a3b8"} strokeWidth={2} />
+            style={{
+              background: "var(--color-bg-nav)", border: "none", borderRadius: 10, padding: 10,
+              cursor: atMax ? "default" : "pointer",
+              display: "flex", alignItems: "center", justifyContent: "center",
+              opacity: atMax ? 0.3 : 1, transition: "opacity 0.2s",
+            }}>
+            <ChevronRight className="icon-nav" color="var(--color-text-lo)" strokeWidth={2} />
           </button>
         </div>
         <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 8 }}>
@@ -372,10 +377,15 @@ function MonthPicker({ current, onSelect, onClose }: {
                 style={{
                   padding: "11px 4px", borderRadius: 12, position: "relative",
                   border: isSelected ? "2px solid var(--accent)" : "1px solid transparent",
-                  background: isSelected ? "var(--accent-muted)" : isToday ? "#1e2a38" : "transparent",
-                  color: isFuture ? "var(--color-text-ghost)" : isSelected ? "var(--accent)" : "#cbd5e1",
+                  background: isSelected ? "var(--accent-muted)" : isToday ? "var(--color-border)" : "transparent",
+                  // Future months: opacity-based disable — clear on both dark and light themes
+                  // Past/present months: full text-mid color — readable on both themes
+                  color: isSelected ? "var(--accent)" : "var(--color-text-mid)",
+                  opacity: isFuture ? 0.3 : 1,
                   fontFamily: "var(--font-body)",
-                  fontWeight: isSelected ? 600 : 400, fontSize: 13, cursor: isFuture ? "default" : "pointer", transition: "all 0.15s",
+                  fontWeight: isSelected ? 600 : 400, fontSize: 13,
+                  cursor: isFuture ? "default" : "pointer",
+                  transition: "all 0.15s",
                 }}>
                 {m}
                 {isToday && !isSelected && (
@@ -427,12 +437,26 @@ function EntryModal({ tx, selectedMonth, monthBalance, totalUSD: currentTotal, o
   useEffect(() => { setTimeout(() => amountRef.current?.focus(), 120); }, []);
   useFocusTrap(modalRef, true);
 
-  // §4 Edit Persistence — switching currency tab NEVER resets or converts the amount.
-  // The user explicitly requested: "keep it as it is, only need user typing to change."
-  // Rationale: auto-conversion creates confusion (rounding, back-and-forth drift).
-  // The field stays exactly as typed; user clears and re-types if they want a different value.
+  // Currency switch: convert the current amount to the new currency so the user
+  // always sees the correct equivalent value without re-typing.
+  // USD→KHR: 50 → 200,000 (×4,000, snapped to nearest 100 KHR step)
+  // KHR→USD: 200,000 → 50 (÷4,000, rounded to 2 dp)
+  // If the field is empty, just switch the label — nothing to convert.
   const handleCurrencyChange = (c: Currency) => {
     if (c === currency) return;
+
+    if (rawAmount) {
+      if (currency === "USD" && c === "KHR") {
+        const usdVal = parseFloat(rawAmount) || 0;
+        const khrRaw = Math.round(usdVal * EXCHANGE_RATE / KHR_STEP) * KHR_STEP;
+        setRawAmount(khrRaw > 0 ? String(khrRaw) : "");
+      } else if (currency === "KHR" && c === "USD") {
+        const khrVal = parseInt(rawAmount, 10) || 0;
+        const usdVal = pin2(khrVal / EXCHANGE_RATE);
+        setRawAmount(usdVal > 0 ? String(usdVal) : "");
+      }
+    }
+
     setCurrency(c);
     setKhrHint(false);
   };
@@ -527,7 +551,7 @@ function EntryModal({ tx, selectedMonth, monthBalance, totalUSD: currentTotal, o
           </span>
           <button aria-label="Close" onClick={onClose}
             style={{ background: "var(--color-bg-nav)", border: "none", borderRadius: 9, padding: 9, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", minWidth: 36, minHeight: 36 }}>
-            <X className="icon-nav" color="#64748b" strokeWidth={2} />
+            <X className="icon-nav" color="var(--color-text-lo)" strokeWidth={2} />
           </button>
         </div>
 
@@ -595,7 +619,7 @@ function EntryModal({ tx, selectedMonth, monthBalance, totalUSD: currentTotal, o
                 zIndex: 2, minWidth: 28, minHeight: 28,
               }}
             >
-              <X size={14} color="#64748b" strokeWidth={2.5} />
+              <X size={14} color="var(--color-text-lo)" strokeWidth={2.5} />
             </button>
           )}
         </motion.div>
@@ -682,7 +706,7 @@ function EntryModal({ tx, selectedMonth, monthBalance, totalUSD: currentTotal, o
             </span>
             <CalendarDays
               size={16}
-              color="#64748b"
+              color="var(--color-text-lo)"
               strokeWidth={1.8}
               style={{ marginLeft: "auto", flexShrink: 0 }}
             />
@@ -1167,7 +1191,7 @@ export default function ApsaraSpendPage() {
             style={{
               display: "flex", alignItems: "center", gap: 6,
               background: filterCategory !== "all" ? `${activeCat?.color}18` : "var(--color-bg-nav)",
-              border: filterCategory !== "all" ? `1px solid ${activeCat?.color}40` : "1px solid #1e2a38",
+              border: filterCategory !== "all" ? `1px solid ${activeCat?.color}40` : "1px solid var(--color-border-mid)",
               borderRadius: 8, padding: "5px 10px",
               cursor: "pointer", transition: "all 0.15s",
             }}
@@ -1202,7 +1226,7 @@ export default function ApsaraSpendPage() {
                   position: "absolute", top: "calc(100% + 6px)", right: 0,
                   background: "var(--color-bg-nav)", border: "1px solid var(--color-border-mid)",
                   borderRadius: 12, padding: "6px", zIndex: 100,
-                  minWidth: 148, boxShadow: "0 8px 24px rgba(0,0,0,0.5)",
+                  minWidth: 148, boxShadow: "0 8px 24px rgba(0,0,0,0.15)",
                 }}
               >
                 {/* All option */}
@@ -1211,11 +1235,11 @@ export default function ApsaraSpendPage() {
                   style={{
                     width: "100%", display: "flex", alignItems: "center", gap: 8,
                     padding: "8px 10px", borderRadius: 8, border: "none",
-                    background: filterCategory === "all" ? "#1e2a38" : "transparent",
+                    background: filterCategory === "all" ? "var(--color-border)" : "transparent",
                     cursor: "pointer", transition: "background 0.12s",
                   }}
                 >
-                  <span style={{ fontSize: 13, fontWeight: filterCategory === "all" ? 600 : 400, color: filterCategory === "all" ? "#f8fafc" : "#94a3b8", fontFamily: "var(--font-body)" }}>
+                  <span style={{ fontSize: 13, fontWeight: filterCategory === "all" ? 600 : 400, color: "var(--color-text-hi)", fontFamily: "var(--font-body)" }}>
                     All categories
                   </span>
                 </button>
@@ -1236,7 +1260,7 @@ export default function ApsaraSpendPage() {
                     }}
                   >
                     <c.Icon size={14} color={c.color} strokeWidth={1.8} />
-                    <span style={{ fontSize: 13, fontWeight: filterCategory === c.id ? 600 : 400, color: filterCategory === c.id ? c.color : "#94a3b8", fontFamily: "var(--font-body)" }}>
+                    <span style={{ fontSize: 13, fontWeight: filterCategory === c.id ? 600 : 400, color: filterCategory === c.id ? c.color : "var(--color-text-lo)", fontFamily: "var(--font-body)" }}>
                       {c.label}
                     </span>
                   </button>
@@ -1309,10 +1333,8 @@ export default function ApsaraSpendPage() {
         display: "flex", flexDirection: "column", alignItems: "center",
         justifyContent: "center", textAlign: "center",
         padding: "48px 32px",
-        // S2 — non-scrolling: fill the full viewport height, no overflow
-        // The CTA is always visible without the user needing to scroll
-        minHeight: "100dvh",
-        overflow: "hidden",
+        // Removed min-height:100dvh — let content be natural height
+        // Body scroll lock already prevents rubber-band scroll when no budget set
       }}
     >
       {/* Wallet illustration (reused from EmptyState) */}
@@ -1353,7 +1375,6 @@ export default function ApsaraSpendPage() {
           padding: "16px 32px",
           fontSize: 16, fontWeight: 700, fontFamily: "var(--font-headline)",
           cursor: "pointer", letterSpacing: "0.02em",
-          boxShadow: "0 20px 50px rgba(0,0,0,0.4)",
           display: "flex", alignItems: "center", gap: 8,
         }}
       >
@@ -1520,12 +1541,13 @@ export default function ApsaraSpendPage() {
           .monthnav-pad { padding: var(--sp-4) var(--sp-8) 0; }
         }
 
-        /* Dashboard card grid — 12px gap on mobile, 16px on tablet grid    */
+        /* Dashboard card grid — always single column flex stack ──────────── */
+        /* Issue 3: always 1-col, n-rows on all screen sizes                  */
         .dash-pad  { padding: var(--sp-4) var(--sp-4) 0; display: flex; flex-direction: column; gap: var(--sp-4); }
         @media (min-width: 768px) {
-          .dash-pad  { padding: var(--sp-4) var(--sp-8) 0; display: grid; grid-template-columns: 1fr 1fr; grid-template-rows: auto 1fr; gap: var(--sp-4); }
-          .col-left  { display: flex; flex-direction: column; gap: var(--sp-4); grid-column: 1; }
-          .col-right { grid-column: 2; grid-row: 1 / -1; }
+          .dash-pad  { padding: var(--sp-4) var(--sp-8) 0; }
+          .col-left  { display: flex; flex-direction: column; gap: var(--sp-4); }
+          .col-right { display: flex; flex-direction: column; }
         }
 
         /* ── Responsive FAB ─────────────────────────────────────────────── */
@@ -1606,7 +1628,7 @@ export default function ApsaraSpendPage() {
             </div>
             <button aria-label="Open settings" onClick={() => setShowSettings(true)}
               style={{ background: "var(--color-bg-nav)", border: "1px solid var(--color-border-mid)", borderRadius: 12, padding: 12, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", minWidth: 44, minHeight: 44, marginTop: 4 }}>
-              <Settings className="icon-nav" color="#64748b" strokeWidth={1.8} />
+              <Settings className="icon-nav" color="var(--color-text-lo)" strokeWidth={1.8} />
             </button>
           </div>
 
@@ -1614,7 +1636,7 @@ export default function ApsaraSpendPage() {
           <div className="monthnav-pad" style={{ display: "flex", alignItems: "center", gap: 12 }}>
             <button aria-label="Previous month" onClick={() => navigateMonth(-1)}
               style={{ background: "var(--color-bg-nav)", border: "1px solid var(--color-border-mid)", borderRadius: 10, padding: 12, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", minWidth: 44, minHeight: 44 }}>
-              <ChevronLeft className="icon-nav" color="#64748b" strokeWidth={2} />
+              <ChevronLeft className="icon-nav" color="var(--color-text-lo)" strokeWidth={2} />
             </button>
 
             <button aria-label="Open month picker" onClick={() => setShowPicker(true)}
@@ -1635,8 +1657,17 @@ export default function ApsaraSpendPage() {
             </button>
 
             <button aria-label="Next month" onClick={() => navigateMonth(1)} disabled={isCurrentMonth}
-              style={{ background: isCurrentMonth ? "transparent" : "var(--color-bg-nav)", border: isCurrentMonth ? "1px solid #0d1117" : "1px solid #1e2a38", borderRadius: 10, padding: 12, cursor: isCurrentMonth ? "default" : "pointer", display: "flex", alignItems: "center", justifyContent: "center", minWidth: 44, minHeight: 44 }}>
-              <ChevronRight className="icon-nav" color={isCurrentMonth ? "var(--color-text-ghost)" : "#64748b"} strokeWidth={2} />
+              style={{
+                background: isCurrentMonth ? "transparent" : "var(--color-bg-nav)",
+                border: "1px solid var(--color-border-mid)",
+                borderRadius: 10, padding: 12,
+                cursor: isCurrentMonth ? "default" : "pointer",
+                display: "flex", alignItems: "center", justifyContent: "center",
+                minWidth: 44, minHeight: 44,
+                opacity: isCurrentMonth ? 0.3 : 1,
+                transition: "opacity 0.2s",
+              }}>
+              <ChevronRight className="icon-nav" color="var(--color-text-lo)" strokeWidth={2} />
             </button>
           </div>
 
@@ -1771,7 +1802,7 @@ export default function ApsaraSpendPage() {
                   </span>
                   <button onClick={() => setShowBudgetModal(false)}
                     style={{ background: "var(--color-bg-nav)", border: "none", borderRadius: 9, padding: 9, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", minWidth: 36, minHeight: 36 }}>
-                    <X className="icon-nav" color="#64748b" strokeWidth={2} />
+                    <X className="icon-nav" color="var(--color-text-lo)" strokeWidth={2} />
                   </button>
                 </div>
                 <div style={{ fontSize: 12, color: "var(--color-text-lo)", marginBottom: 24, fontFamily: "var(--font-body)", lineHeight: 1.5 }}>
@@ -1847,13 +1878,13 @@ export default function ApsaraSpendPage() {
 
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 24 }}>
                   <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                    <Settings className="icon-nav" color="#64748b" strokeWidth={1.8} />
+                    <Settings className="icon-nav" color="var(--color-text-lo)" strokeWidth={1.8} />
                     <span style={{ fontSize: 22, fontWeight: 600, color: "var(--color-text-hi)", fontFamily: "var(--font-headline)", letterSpacing: "-0.01em" }}>Settings</span>
                   </div>
                   <button aria-label="Close settings"
                     onClick={() => { setShowSettings(false); setResetConfirm(false); }}
                     style={{ background: "var(--color-bg-nav)", border: "none", borderRadius: 9, padding: 9, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", minWidth: 36, minHeight: 36 }}>
-                    <X className="icon-nav" color="#64748b" strokeWidth={2} />
+                    <X className="icon-nav" color="var(--color-text-lo)" strokeWidth={2} />
                   </button>
                 </div>
 
@@ -1932,7 +1963,7 @@ export default function ApsaraSpendPage() {
                     </div>
                   ) : (
                     <div>
-                      <div style={{ fontSize: 14, color: "#fca5a5", fontWeight: 600, marginBottom: 14, fontFamily: "var(--font-body)", lineHeight: 1.5 }}>
+                      <div style={{ fontSize: 14, color: "var(--color-text-hi)", fontWeight: 600, marginBottom: 14, fontFamily: "var(--font-body)", lineHeight: 1.5 }}>
                         Delete all {MONTH_FULL[month - 1]} {year} entries? This cannot be undone.
                       </div>
                       <div style={{ display: "flex", gap: 8 }}>
