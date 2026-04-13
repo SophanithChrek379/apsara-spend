@@ -392,7 +392,7 @@ function MonthPicker({ current, onSelect, onClose }: {
         initial={{ scale: 0.92, opacity: 0, y: 16 }} animate={{ scale: 1, opacity: 1, y: 0 }}
         exit={{ scale: 0.92, opacity: 0, y: 16 }}
         transition={{ type: "spring", damping: 22, stiffness: 300 }}
-        style={{ background: "var(--color-bg-nav)", borderRadius: 24, padding: "28px 28px", border: "1px solid var(--color-border-mid)", width: "100%", maxWidth: 340 }}
+        style={{ background: "var(--color-bg-nav)", borderRadius: 24, padding: "24px 20px", border: "1px solid var(--color-border-mid)", width: "100%", maxWidth: 340 }}
         onClick={(e) => e.stopPropagation()}
       >
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}>
@@ -929,6 +929,10 @@ export default function ApsaraSpendPage() {
   // confirmDeleteTx holds the transaction pending confirmation.
   const [openSwipeId,      setOpenSwipeId]      = useState<string | null>(null);
   const [confirmDeleteTx,  setConfirmDeleteTx]  = useState<Transaction | null>(null);
+  const dragStarted = useRef(false);
+  // I1 — Infinite scroll: show 10 rows at a time, load more as user scrolls
+  const [visibleCount,     setVisibleCount]     = useState(10);
+  const loadMoreRef = useRef<HTMLDivElement>(null);
   // O2 — monthly budget flow state
   const [showBudgetModal,  setShowBudgetModal]  = useState(false);
   const [budgetInput,      setBudgetInput]      = useState("");
@@ -1157,6 +1161,22 @@ export default function ApsaraSpendPage() {
   // Reset fired tiers on month switch so alerts re-arm for new month
   useEffect(() => { firedTiers.current = new Set(); }, [selectedMonth]);
 
+  // I1/I2 — IntersectionObserver: load 10 more rows when sentinel enters viewport
+  useEffect(() => {
+    const el = loadMoreRef.current;
+    if (!el) return;
+    const observer = new IntersectionObserver((entries) => {
+      if (entries[0].isIntersecting) {
+        setVisibleCount((v) => v + 10);
+      }
+    }, { threshold: 0.1 });
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [loadMoreRef]);
+
+  // Reset visible count when month or filter changes so we always start at top
+  useEffect(() => { setVisibleCount(10); }, [selectedMonth, filterCategory]);
+
   // ── Navigation ───────────────────────────────────────────────────────────────
 
   const navigateMonth = (delta: 1 | -1) => {
@@ -1264,7 +1284,7 @@ export default function ApsaraSpendPage() {
     <div style={{ background: "var(--color-bg-card)", borderRadius: 22, border: "1px solid var(--color-border)", overflow: "hidden", display: "flex", flexDirection: "column" }}>
 
       {/* ── Summary section ── */}
-      <div style={{ padding: "28px 28px 22px" }}>
+      <div style={{ padding: "24px 20px 20px" }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", marginBottom: 16 }}>
           <div>
             <div style={{ fontSize: 11, color: "var(--color-text-lo)", letterSpacing: "0.14em", textTransform: "uppercase", marginBottom: 8, fontFamily: "var(--font-body)", fontWeight: 600 }}>
@@ -1332,7 +1352,7 @@ export default function ApsaraSpendPage() {
       {hasBreakdown && (
         <>
           <div style={{ height: 1, background: "#1a2333", margin: "0 24px" }} />
-          <div style={{ padding: "22px 28px 28px" }}>
+          <div style={{ padding: "20px 20px 24px" }}>
             <div style={{ fontSize: 11, color: "var(--color-text-lo)", letterSpacing: "0.14em", textTransform: "uppercase", marginBottom: 16, fontFamily: "var(--font-body)", fontWeight: 600 }}>
               Breakdown
             </div>
@@ -1363,7 +1383,7 @@ export default function ApsaraSpendPage() {
   );
 
   const EmptyState = (
-    <div style={{ textAlign: "center", padding: "56px 28px", background: "var(--color-bg-card)", borderRadius: 22, border: "1px solid var(--color-border)", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center" }}>
+    <div style={{ textAlign: "center", padding: "48px 20px", background: "var(--color-bg-card)", borderRadius: 22, border: "1px solid var(--color-border)", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center" }}>
 
       {/* Inline SVG — undraw-style empty wallet illustration              */}
       {/* Colours: amber #fbbf24, slate body #1e2a38, surface #141920      */}
@@ -1413,7 +1433,7 @@ export default function ApsaraSpendPage() {
   );
 
   const TransactionList = hasData ? (
-    <div style={{ background: "var(--color-bg-card)", borderRadius: 22, padding: "28px 28px", border: "1px solid var(--color-border)", display: "flex", flexDirection: "column" }}>
+    <div style={{ background: "var(--color-bg-card)", borderRadius: 22, padding: "24px 20px", border: "1px solid var(--color-border)", display: "flex", flexDirection: "column" }}>
 
       {/* ── Header row: count label + category filter dropdown ── */}
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}>
@@ -1516,60 +1536,78 @@ export default function ApsaraSpendPage() {
         <div style={{ textAlign: "center", padding: "24px 0", color: "var(--color-text-lo)", fontSize: 13, fontFamily: "var(--font-body)" }}>
           No {activeCat?.label} entries this month
         </div>
-      ) : (
-        filteredTxs
-          .sort((a, b) =>
-            new Date(b.date).getTime() - new Date(a.date).getTime() ||
-            b.id.localeCompare(a.id)
-          )
-          .map((tx, i) => {
+      ) : (() => {
+        const sorted = [...filteredTxs].sort((a, b) =>
+          new Date(b.date).getTime() - new Date(a.date).getTime() ||
+          b.id.localeCompare(a.id)
+        );
+        const visible  = sorted.slice(0, visibleCount);
+        const hasMore  = visibleCount < sorted.length;
+        return (
+          <>
+            {visible.map((tx, i) => {
             const cat     = CATEGORIES.find((c) => c.id === tx.category) ?? CATEGORIES[5];
             const dateStr = formatDisplayDate(localDateString(new Date(tx.date)));
-            const isLast  = i === filteredTxs.length - 1;
+            const isLast  = i === visible.length - 1 && !hasMore;
             const isOpen  = openSwipeId === tx.id;
             return (
-              // L — SwipeableRow: outer clips the reveal, inner is the draggable row
               <div key={tx.id} style={{ position: "relative", overflow: "hidden",
                 borderBottom: isLast ? "none" : "1px solid var(--color-border)" }}>
 
-                {/* Delete reveal zone — tapping opens confirmation sheet */}
-                <button
-                  onClick={() => { setConfirmDeleteTx(tx); setOpenSwipeId(null); }}
-                  style={{
-                    position: "absolute", right: 0, top: 0, bottom: 0, width: 80,
-                    background: "#ef4444", border: "none", cursor: "pointer",
-                    display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 4,
-                  }}>
-                  <Trash2 size={18} color="#fff" strokeWidth={2} />
-                  <span style={{ fontSize: 10, fontWeight: 600, color: "#fff", fontFamily: "var(--font-body)", letterSpacing: "0.04em" }}>DELETE</span>
-                </button>
+                {/* S1 — Two-button reveal zone: EDIT (left) | DELETE (right) */}
+                <div style={{ position: "absolute", right: 0, top: 0, bottom: 0, width: 160, display: "flex" }}>
+                  {/* EDIT action */}
+                  <button
+                    onClick={() => { setEditTx(tx); setShowModal(true); setOpenSwipeId(null); }}
+                    style={{
+                      flex: 1, border: "none", cursor: "pointer",
+                      background: "var(--color-bg-nav)",
+                      display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 4,
+                      borderRight: "1px solid var(--color-border)",
+                    }}>
+                    <Pencil size={16} color="var(--color-text-hi)" strokeWidth={2} />
+                    <span style={{ fontSize: 10, fontWeight: 600, color: "var(--color-text-hi)", fontFamily: "var(--font-body)", letterSpacing: "0.04em" }}>EDIT</span>
+                  </button>
+                  {/* DELETE action */}
+                  <button
+                    onClick={() => { setConfirmDeleteTx(tx); setOpenSwipeId(null); }}
+                    style={{
+                      flex: 1, border: "none", cursor: "pointer",
+                      background: "#ef4444",
+                      display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 4,
+                    }}>
+                    <Trash2 size={16} color="#fff" strokeWidth={2} />
+                    <span style={{ fontSize: 10, fontWeight: 600, color: "#fff", fontFamily: "var(--font-body)", letterSpacing: "0.04em" }}>DELETE</span>
+                  </button>
+                </div>
 
-                {/* Draggable row — animates to x:-80 when open, x:0 when closed */}
+                {/* Draggable row — S1: constraint -160 to reveal both buttons */}
                 <motion.div
                   drag="x"
                   dragDirectionLock
-                  dragConstraints={{ left: -80, right: 0 }}
-                  dragElastic={{ left: 0.08, right: 0 }}
-                  animate={{ x: isOpen ? -80 : 0 }}
+                  dragConstraints={{ left: -160, right: 0 }}
+                  dragElastic={{ left: 0.06, right: 0 }}
+                  animate={{ x: isOpen ? -160 : 0 }}
                   transition={{ type: "spring", damping: 30, stiffness: 300 }}
+                  onDragStart={() => { dragStarted.current = true; }}
                   onDragEnd={(_e, info) => {
-                    // Snap open if dragged past 48px, snap closed otherwise
-                    if (info.offset.x < -48) {
+                    // Snap open if past 60px threshold, otherwise snap closed
+                    if (info.offset.x < -60) {
                       setOpenSwipeId(tx.id);
                     } else {
                       setOpenSwipeId(null);
                     }
+                    // S4 — clear drag flag after brief delay so click doesn't fire
+                    setTimeout(() => { dragStarted.current = false; }, 120);
                   }}
                   style={{ background: "var(--color-bg-card)", position: "relative", zIndex: 1, touchAction: "pan-y" }}
                 >
                   <motion.button
                     initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: i * 0.03 }}
                     onClick={() => {
-                      if (isOpen) {
-                        // Tap row content to close snap back
-                        setOpenSwipeId(null);
-                        return;
-                      }
+                      // S4 — block accidental edit if drag just finished
+                      if (dragStarted.current) return;
+                      if (isOpen) { setOpenSwipeId(null); return; }
                       setEditTx(tx); setShowModal(true);
                     }}
                     style={{
@@ -1591,16 +1629,34 @@ export default function ApsaraSpendPage() {
                       <span style={{ fontSize: 16, fontWeight: 700, color: "var(--color-text-hi)", fontFamily: "var(--font-mono)" }}>
                         {fmt(tx.amountUSD)}
                       </span>
-                      <span style={{ display: "flex", alignItems: "center", gap: 2, color: isOpen ? "var(--accent)" : "var(--color-text-lo)", letterSpacing: "0.06em", fontFamily: "var(--font-body)", fontSize: 11, transition: "color 0.2s" }}>
-                        {isOpen ? <>TAP EDIT TO CLOSE</> : <>EDIT <ChevronRight size={11} strokeWidth={2.5} /></>}
-                      </span>
                     </div>
                   </motion.button>
                 </motion.div>
               </div>
             );
-          })
-      )}
+          })}
+
+          {/* I3 — Skeleton rows while more items exist below the fold */}
+          {hasMore && [0,1].map(j => (
+            <div key={`skel-${j}`} style={{ display: "flex", alignItems: "center", gap: 12, padding: "12px 0",
+              borderBottom: "1px solid var(--color-border)" }}>
+              <div className="skeleton skeleton-circle" style={{ width: 40, height: 40, flexShrink: 0 }} />
+              <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 6 }}>
+                <div className="skeleton skeleton-round" style={{ width: `${j === 0 ? 65 : 78}%`, height: 13 }} />
+                <div className="skeleton skeleton-round" style={{ width: "40%", height: 10 }} />
+              </div>
+              <div style={{ display: "flex", flexDirection: "column", gap: 5, alignItems: "flex-end" }}>
+                <div className="skeleton skeleton-round" style={{ width: 52, height: 13 }} />
+                <div className="skeleton skeleton-round" style={{ width: 28, height: 10 }} />
+              </div>
+            </div>
+          ))}
+
+          {/* I2 — IntersectionObserver sentinel: triggers loading next batch */}
+          <div ref={loadMoreRef} style={{ height: 1 }} />
+          </>
+        );
+      })()}
     </div>
   ) : null;
 
@@ -1794,7 +1850,7 @@ export default function ApsaraSpendPage() {
         *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
         html { font-size: 16px; }
         html, body {
-          background: #080b10;
+          background: var(--color-bg-page);
           min-height: 100dvh;
           overscroll-behavior: none;
           font-family: var(--font-body);
@@ -1836,8 +1892,9 @@ export default function ApsaraSpendPage() {
 
         /* H2 — safe-area-inset-top lives in the sticky header, not header-pad */
         /* header-pad top padding only needs to clear the internal card spacing */
-        .header-pad   { padding: max(var(--sp-6), env(safe-area-inset-top)) var(--sp-6) var(--sp-2); }
-        .monthnav-pad { padding: var(--sp-3) var(--sp-6) var(--sp-4); }
+        /* Mobile: sp-4(16px) sides aligns header with card edges              */
+        .header-pad   { padding: max(var(--sp-6), env(safe-area-inset-top)) var(--sp-4) var(--sp-2); }
+        .monthnav-pad { padding: var(--sp-3) var(--sp-4) var(--sp-3); }
 
         /* Tablet / Desktop */
         @media (min-width: 768px) {
@@ -1846,9 +1903,8 @@ export default function ApsaraSpendPage() {
           .monthnav-pad { padding: var(--sp-3) var(--sp-8) var(--sp-4); }
         }
 
-        /* I3 — Main scroll content padding-bottom matches footer height      */
-        /* Mobile: ~90px clears the sticky footer bar                        */
-        /* Tablet+: reduced since FAB floats and doesn't block content        */
+        /* FAB floating: main scroll needs enough bottom padding so the last   */
+        /* expense row is never hidden behind the FAB on any screen height.    */
         @media (min-width: 768px) {
           .main-scroll { padding-bottom: calc(var(--sp-8) + env(safe-area-inset-bottom)) !important; }
         }
@@ -1856,48 +1912,34 @@ export default function ApsaraSpendPage() {
         /* Dashboard card grid — always single column flex stack ──────────── */
         /* H3 — padding-top compensates for sticky header so summary card     */
         /* is not clipped on initial render. ~140px header height on mobile.  */
-        .dash-pad  { padding: var(--sp-4) var(--sp-4) 0; display: flex; flex-direction: column; gap: var(--sp-4); }
+        /* Mobile: 12px sides so cards sit 12px from screen edge              */
+        .dash-pad  { padding: var(--sp-3) var(--sp-3) 0; display: flex; flex-direction: column; gap: var(--sp-3); }
         @media (min-width: 768px) {
-          .dash-pad  { padding: var(--sp-4) var(--sp-8) 0; }
+          .dash-pad  { padding: var(--sp-4) var(--sp-8) 0; gap: var(--sp-4); }
           .col-left  { display: flex; flex-direction: column; gap: var(--sp-4); }
           .col-right { display: flex; flex-direction: column; }
         }
 
-        /* ── I1  FAB sticky footer — mobile-first ────────────────────────── */
-        /* Mobile: full-width footer bar with blurred background,             */
-        /* border-top hairline, and safe-area bottom padding.                 */
+        /* ── FAB — Floating Action Button (mobile + desktop) ─────────────── */
+        /* Mobile-first: circular pill at bottom-right, floating above content  */
+        /* High elevation shadow + safe-area clearance for home indicator        */
         .fab-footer {
           position: fixed;
-          bottom: 0; left: 0; right: 0;
+          bottom: calc(var(--sp-8) + env(safe-area-inset-bottom));
+          right: var(--sp-5);
           z-index: 50;
-          padding: var(--sp-3) var(--sp-4) calc(var(--sp-3) + env(safe-area-inset-bottom));
-          backdrop-filter: blur(16px) saturate(1.4);
-          -webkit-backdrop-filter: blur(16px) saturate(1.4);
-          background: color-mix(in srgb, var(--color-bg-page) 88%, transparent);
-          border-top: 0.5px solid color-mix(in srgb, var(--color-border) 50%, transparent);
+          /* No background container — button floats directly */
         }
-        /* The button inside fills the footer bar on mobile */
         .fab-btn {
-          width: 100%;
-          max-width: 400px;
-          margin: 0 auto;
+          /* Pill shape on mobile: icon + label */
+          width: auto;
           display: flex;
         }
-        /* I2 — Tablet+: revert to right-anchored floating pill, no footer bar */
+        /* Desktop: align to right edge of main-wrap container */
         @media (min-width: 768px) {
           .fab-footer {
             bottom: calc(var(--sp-8) + env(safe-area-inset-bottom));
-            left: auto; right: var(--sp-8);
-            padding: 0;
-            background: transparent;
-            backdrop-filter: none;
-            -webkit-backdrop-filter: none;
-            border-top: none;
-          }
-          .fab-btn {
-            width: auto;
-            max-width: 220px;
-            margin: 0;
+            right: calc(50% - 450px + var(--sp-8));
           }
         }
 
@@ -2037,7 +2079,7 @@ export default function ApsaraSpendPage() {
           background: "radial-gradient(circle, var(--accent-muted) 0%, transparent 68%)",
         }} />
 
-        <div className="main-scroll" style={{ position: "relative", zIndex: 1, paddingBottom: "calc(90px + env(safe-area-inset-bottom))" }}>
+        <div className="main-scroll" style={{ position: "relative", zIndex: 1, paddingBottom: "calc(120px + env(safe-area-inset-bottom))" }}>
 
           {/* ════ STICKY HEADER — app title + month navigation ════ */}
           <div className="sticky-header">
@@ -2101,22 +2143,26 @@ export default function ApsaraSpendPage() {
               <ChevronLeft className="icon-nav" color="var(--color-text-lo)" strokeWidth={2} />
             </button>
 
-            <button aria-label="Open month picker" onClick={() => setShowPicker(true)}
-              style={{ flex: 1, background: "transparent", border: "none", cursor: "pointer", display: "flex", flexDirection: "column", alignItems: "center", padding: "4px 0" }}>
+            {/* M1 — Non-interactive flex spacer; M2 — small button on month text only */}
+            <div style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", padding: "4px 0" }}>
               <AnimatePresence mode="wait" custom={swipeDir}>
                 <motion.div key={selectedMonth} custom={swipeDir} variants={slideVariants}
                   initial="enter" animate="center" exit="exit"
                   transition={{ duration: 0.22, ease: [0.4, 0, 0.2, 1] }}
                   style={{ textAlign: "center" }}>
-                  <div style={{ fontSize: 24, fontWeight: 700, color: "var(--color-text-hi)", letterSpacing: "-0.01em", fontFamily: "var(--font-headline)", lineHeight: 1.1 }}>
-                    {MONTH_FULL[month - 1]}
-                  </div>
+                  {/* M2 — Tappable month name: precise target, auto-width only */}
+                  <button aria-label="Open month picker" onClick={() => setShowPicker(true)}
+                    style={{ background: "none", border: "none", cursor: "pointer", padding: "2px 8px", borderRadius: 8 }}>
+                    <div style={{ fontSize: 24, fontWeight: 700, color: "var(--color-text-hi)", letterSpacing: "-0.01em", fontFamily: "var(--font-headline)", lineHeight: 1.1 }}>
+                      {MONTH_FULL[month - 1]}
+                    </div>
+                  </button>
                   <div style={{ fontSize: 13, color: "var(--color-text-lo)", marginTop: 4, fontWeight: 500, fontFamily: "var(--font-body)" }}>
                     {year}{isCurrentMonth && <span style={{ color: "var(--accent)", fontSize: 11, letterSpacing: "0.08em", marginLeft: 6, fontFamily: "var(--font-body)", fontWeight: 600, display: "inline-flex", alignItems: "center", gap: 3 }}><Circle size={6} fill="var(--accent)" color="var(--accent)" /> NOW</span>}
                   </div>
                 </motion.div>
               </AnimatePresence>
-            </button>
+            </div>
 
             <button aria-label="Next month" onClick={() => navigateMonth(1)} disabled={isCurrentMonth}
               style={{
@@ -2150,7 +2196,7 @@ export default function ApsaraSpendPage() {
                 {!isLoaded ? (
                   <div className="dash-pad">
                     {/* J4 — SummaryBreakdownCard skeleton */}
-                    <div style={{ background: "var(--color-bg-card)", borderRadius: 22, border: "1px solid var(--color-border)", padding: "28px 28px 22px", display: "flex", flexDirection: "column", gap: 16 }}>
+                    <div style={{ background: "var(--color-bg-card)", borderRadius: 22, border: "1px solid var(--color-border)", padding: "24px 20px 20px", display: "flex", flexDirection: "column", gap: 16 }}>
                       {/* Total amount block */}
                       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end" }}>
                         <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
@@ -2187,7 +2233,7 @@ export default function ApsaraSpendPage() {
                     </div>
 
                     {/* J5 — TransactionList skeleton */}
-                    <div style={{ background: "var(--color-bg-card)", borderRadius: 22, border: "1px solid var(--color-border)", padding: "28px 28px" }}>
+                    <div style={{ background: "var(--color-bg-card)", borderRadius: 22, border: "1px solid var(--color-border)", padding: "24px 20px" }}>
                       <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 20 }}>
                         <div className="skeleton skeleton-round" style={{ width: 70, height: 11 }} />
                         <div className="skeleton skeleton-round" style={{ width: 50, height: 24, borderRadius: 8 }} />
@@ -2235,11 +2281,12 @@ export default function ApsaraSpendPage() {
           </div>
         </div>
 
-        {/* ════ FAB sticky footer — only shown after budget is set ════ */}
+        {/* ════ FAB — Floating Action Button, shown after budget is set ════ */}
         {hasMonthBudget && (
         <div className="fab-footer">
         <motion.button
-          whileTap={{ scale: fabDisabled ? 1 : 0.97 }}
+          whileTap={{ scale: fabDisabled ? 1 : 0.94 }}
+          whileHover={{ scale: fabDisabled ? 1 : 1.04 }}
           aria-label={fabDisabled ? "Monthly budget reached" : "Add new expense"}
           onClick={() => {
             if (fabDisabled) {
@@ -2252,29 +2299,32 @@ export default function ApsaraSpendPage() {
           className="fab-btn"
           style={{
             background: fabDisabled
-              ? "var(--color-border-mid)"
+              ? "var(--color-bg-nav)"
               : "linear-gradient(135deg, var(--accent) 0%, var(--accent-dim) 100%)",
             color: fabDisabled ? "var(--color-text-lo)" : "var(--accent-text)",
-            border: "none",
+            border: fabDisabled ? "1px solid var(--color-border-mid)" : "none",
             borderRadius: 16,
-            padding: "16px 28px",
+            padding: "14px 22px",
             cursor: fabDisabled ? "not-allowed" : "pointer",
             zIndex: 50,
             display: "flex", alignItems: "center", justifyContent: "center",
-            gap: 8, letterSpacing: "0.04em",
+            gap: 8, letterSpacing: "0.03em",
             fontFamily: "var(--font-headline)",
-            fontSize: 16, fontWeight: 700,
+            fontSize: 15, fontWeight: 700,
             animation: fabDisabled ? "none" : "pulseGlow 3s ease-in-out infinite",
-            minHeight: 54,
-            opacity: fabDisabled ? 0.6 : 1,
-            boxShadow: fabDisabled ? "none" : "0 8px 24px rgba(0,0,0,0.35)",
-            transition: "background 0.3s, color 0.3s, opacity 0.3s",
+            minHeight: 52,
+            opacity: fabDisabled ? 0.7 : 1,
+            // Layered shadow: high elevation so FAB clearly floats above expense rows
+            boxShadow: fabDisabled
+              ? "0 2px 8px rgba(0,0,0,0.12)"
+              : "0 8px 28px rgba(0,0,0,0.28), 0 2px 8px rgba(0,0,0,0.16)",
+            transition: "background 0.25s, color 0.25s, opacity 0.25s, box-shadow 0.25s",
           }}>
           <Plus size={18} color={fabDisabled ? "var(--color-text-lo)" : "var(--accent-text)"} strokeWidth={3} />
           {fabDisabled ? "Budget Reached" : "Add Expense"}
         </motion.button>
         </div>
-        )}{/* end hasMonthBudget FAB gate */}
+        )}{/* end FAB gate */}
 
         {/* ════ MODALS ════ */}
         <AnimatePresence>
