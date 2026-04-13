@@ -43,7 +43,7 @@ export default function RootLayout({
           href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Open+Sans:wght@400;500;600&family=Poppins:wght@600;700;800&display=swap"
         />
       </head>
-      <body style={{ margin: 0, padding: 0, background: "#080b10" }}>
+      <body style={{ margin: 0, padding: 0 }}>
         {children}
         {/* W2 — Service worker registration: SSR-safe, runs only in browser after load */}
         <script dangerouslySetInnerHTML={{ __html: `

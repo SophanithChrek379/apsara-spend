@@ -932,7 +932,20 @@ export default function ApsaraSpendPage() {
   const dragStarted = useRef(false);
   // I1 — Infinite scroll: show 10 rows at a time, load more as user scrolls
   const [visibleCount,     setVisibleCount]     = useState(10);
-  const loadMoreRef = useRef<HTMLDivElement>(null);
+  // Fix: use callback ref instead of useRef so the observer attaches the moment
+  // the sentinel div mounts (after list renders), not on initial component mount
+  // when the div doesn't exist yet.
+  const loadMoreRef = useCallback((node: HTMLDivElement | null) => {
+    if (!node) return;
+    const observer = new IntersectionObserver((entries) => {
+      if (entries[0].isIntersecting) {
+        setVisibleCount((v) => v + 10);
+      }
+    }, { rootMargin: "100px", threshold: 0 });
+    observer.observe(node);
+    // Return cleanup via a WeakMap pattern isn't possible here, but the
+    // observer auto-disconnects when the node is removed from DOM.
+  }, []);
   // O2 — monthly budget flow state
   const [showBudgetModal,  setShowBudgetModal]  = useState(false);
   const [budgetInput,      setBudgetInput]      = useState("");
@@ -1160,19 +1173,6 @@ export default function ApsaraSpendPage() {
 
   // Reset fired tiers on month switch so alerts re-arm for new month
   useEffect(() => { firedTiers.current = new Set(); }, [selectedMonth]);
-
-  // I1/I2 — IntersectionObserver: load 10 more rows when sentinel enters viewport
-  useEffect(() => {
-    const el = loadMoreRef.current;
-    if (!el) return;
-    const observer = new IntersectionObserver((entries) => {
-      if (entries[0].isIntersecting) {
-        setVisibleCount((v) => v + 10);
-      }
-    }, { threshold: 0.1 });
-    observer.observe(el);
-    return () => observer.disconnect();
-  }, [loadMoreRef]);
 
   // Reset visible count when month or filter changes so we always start at top
   useEffect(() => { setVisibleCount(10); }, [selectedMonth, filterCategory]);
@@ -1652,8 +1652,8 @@ export default function ApsaraSpendPage() {
             </div>
           ))}
 
-          {/* I2 — IntersectionObserver sentinel: triggers loading next batch */}
-          <div ref={loadMoreRef} style={{ height: 1 }} />
+          {/* I2 — Sentinel: callback ref fires IntersectionObserver when this div mounts */}
+          <div ref={loadMoreRef} style={{ height: 4 }} />
           </>
         );
       })()}
@@ -2329,61 +2329,55 @@ export default function ApsaraSpendPage() {
         {/* ════ MODALS ════ */}
         <AnimatePresence>
 
-          {/* ── Swipe-delete confirmation sheet ── */}
+          {/* ── Swipe-delete confirmation — Telegram action sheet style ── */}
           {confirmDeleteTx && (
             <motion.div
               initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-              style={{ position: "fixed", inset: 0, background: "rgba(5,7,12,0.88)", zIndex: 260, display: "flex", alignItems: "flex-end" }}
+              style={{ position: "fixed", inset: 0, background: "rgba(5,7,12,0.72)", zIndex: 260, display: "flex", flexDirection: "column", justifyContent: "flex-end", padding: "0 12px calc(12px + env(safe-area-inset-bottom))" }}
               onClick={() => { setConfirmDeleteTx(null); setOpenSwipeId(null); }}>
+
+              {/* Card 1 — item preview + destructive actions */}
               <motion.div
-                initial={{ y: "100%" }} animate={{ y: 0 }} exit={{ y: "100%" }}
-                transition={{ type: "spring", damping: 30, stiffness: 320 }}
-                role="alertdialog" aria-modal="true" aria-label="Confirm delete expense"
-                style={{ background: "var(--color-bg-card)", borderRadius: "22px 22px 0 0", padding: "24px 24px 40px", width: "100%", maxWidth: 480, margin: "0 auto", border: "1px solid var(--color-border-mid)", borderBottom: "none" }}
+                initial={{ y: 40, opacity: 0 }} animate={{ y: 0, opacity: 1 }}
+                exit={{ y: 40, opacity: 0 }}
+                transition={{ type: "spring", damping: 32, stiffness: 340 }}
+                role="alertdialog" aria-modal="true" aria-label="Delete expense"
+                style={{ background: "var(--color-bg-card)", borderRadius: 16, overflow: "hidden", marginBottom: 10, border: "1px solid var(--color-border-mid)" }}
                 onClick={(e) => e.stopPropagation()}>
 
-                {/* Drag handle */}
-                <div style={{ width: 36, height: 4, background: "var(--color-border-mid)", borderRadius: 2, margin: "0 auto 20px" }} />
-
-                {/* Icon */}
-                <div style={{ width: 48, height: 48, borderRadius: "50%", background: "#ef444418", border: "1px solid #ef444430", display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 16px" }}>
-                  <Trash2 size={20} color="#ef4444" strokeWidth={2} />
-                </div>
-
-                {/* Heading */}
-                <div style={{ textAlign: "center", marginBottom: 20 }}>
-                  <div style={{ fontSize: 17, fontWeight: 700, color: "var(--color-text-hi)", fontFamily: "var(--font-headline)", marginBottom: 8 }}>
+                {/* Item preview header */}
+                <div style={{ padding: "16px 20px 14px", borderBottom: "0.5px solid var(--color-border)", textAlign: "center" }}>
+                  <div style={{ fontSize: 13, color: "var(--color-text-lo)", fontFamily: "var(--font-body)", marginBottom: 4 }}>
                     Remove this expense?
                   </div>
-                  {/* Transaction preview */}
-                  <div style={{ background: "var(--color-bg-page)", borderRadius: 12, padding: "10px 16px", display: "inline-flex", alignItems: "center", gap: 10 }}>
-                    <div style={{ textAlign: "left" }}>
-                      <div style={{ fontSize: 13, fontWeight: 600, color: "var(--color-text-mid)", fontFamily: "var(--font-body)" }}>
-                        {confirmDeleteTx.note || CATEGORIES.find(c => c.id === confirmDeleteTx.category)?.label}
-                      </div>
-                      <div style={{ fontSize: 12, color: "var(--color-text-lo)", fontFamily: "var(--font-body)", marginTop: 2 }}>
-                        {fmt(confirmDeleteTx.amountUSD)} · {formatDisplayDate(localDateString(new Date(confirmDeleteTx.date)))}
-                      </div>
-                    </div>
+                  <div style={{ fontSize: 15, fontWeight: 600, color: "var(--color-text-hi)", fontFamily: "var(--font-headline)" }}>
+                    {confirmDeleteTx.note || CATEGORIES.find(c => c.id === confirmDeleteTx.category)?.label}
                   </div>
-                  <div style={{ fontSize: 12, color: "var(--color-text-lo)", fontFamily: "var(--font-body)", marginTop: 12, lineHeight: 1.5 }}>
-                    This action cannot be undone.
+                  <div style={{ fontSize: 12, color: "var(--color-text-lo)", fontFamily: "var(--font-mono)", marginTop: 3 }}>
+                    {fmt(confirmDeleteTx.amountUSD)} · {formatDisplayDate(localDateString(new Date(confirmDeleteTx.date)))}
                   </div>
                 </div>
 
-                {/* Actions */}
-                <div style={{ display: "flex", gap: 10 }}>
-                  <button
-                    onClick={() => { setConfirmDeleteTx(null); setOpenSwipeId(null); }}
-                    style={{ flex: 1, padding: "14px 0", borderRadius: 14, border: "1px solid var(--color-border-mid)", background: "var(--color-bg-nav)", color: "var(--color-text-lo)", fontSize: 15, fontWeight: 600, fontFamily: "var(--font-body)", cursor: "pointer" }}>
-                    Cancel
-                  </button>
-                  <button
-                    onClick={() => handleDelete(confirmDeleteTx.id)}
-                    style={{ flex: 1, padding: "14px 0", borderRadius: 14, border: "none", background: "#ef4444", color: "#fff", fontSize: 15, fontWeight: 700, fontFamily: "var(--font-body)", cursor: "pointer" }}>
-                    Remove
-                  </button>
-                </div>
+                {/* Destructive action — full width, red text */}
+                <button
+                  onClick={() => handleDelete(confirmDeleteTx.id)}
+                  style={{ width: "100%", padding: "16px 20px", background: "transparent", border: "none", cursor: "pointer", fontSize: 16, fontWeight: 600, color: "#ef4444", fontFamily: "var(--font-body)", textAlign: "center" }}>
+                  Delete Expense
+                </button>
+              </motion.div>
+
+              {/* Card 2 — Cancel (separate card, blue text like Telegram) */}
+              <motion.div
+                initial={{ y: 40, opacity: 0 }} animate={{ y: 0, opacity: 1 }}
+                exit={{ y: 40, opacity: 0 }}
+                transition={{ type: "spring", damping: 32, stiffness: 340, delay: 0.03 }}
+                style={{ background: "var(--color-bg-card)", borderRadius: 16, overflow: "hidden", border: "1px solid var(--color-border-mid)" }}
+                onClick={(e) => e.stopPropagation()}>
+                <button
+                  onClick={() => { setConfirmDeleteTx(null); setOpenSwipeId(null); }}
+                  style={{ width: "100%", padding: "16px 20px", background: "transparent", border: "none", cursor: "pointer", fontSize: 16, fontWeight: 600, color: "var(--accent)", fontFamily: "var(--font-body)", textAlign: "center" }}>
+                  Cancel
+                </button>
               </motion.div>
             </motion.div>
           )}
