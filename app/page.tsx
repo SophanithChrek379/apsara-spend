@@ -443,6 +443,19 @@ function MonthPicker({ current, onSelect, onClose }: {
   );
 }
 
+// ─── Responsive modal animation helper ────────────────────────────────────────
+// Bottom-sheet on mobile (y: "100%"), centred scale-in on tablet+ (scale: 0.96)
+const getModalAnim = () => {
+  if (typeof window === "undefined") return "sheet";
+  return window.innerWidth >= 768 ? "center" : "sheet";
+};
+const MODAL_ENTER_SHEET  = { y: "100%" };
+const MODAL_ENTER_CENTER = { opacity: 0, scale: 0.96, y: 12 };
+const MODAL_ANIM_SHEET   = { y: 0 };
+const MODAL_ANIM_CENTER  = { opacity: 1, scale: 1, y: 0 };
+const MODAL_EXIT_SHEET   = { y: "100%" };
+const MODAL_EXIT_CENTER  = { opacity: 0, scale: 0.96, y: 8 };
+
 // ─── EntryModal ───────────────────────────────────────────────────────────────
 
 function EntryModal({ tx, selectedMonth, monthBalance, totalUSD: currentTotal, constraintMode, onSave, onDelete, onClose }: {
@@ -472,6 +485,8 @@ function EntryModal({ tx, selectedMonth, monthBalance, totalUSD: currentTotal, c
   const [date,          setDate]          = useState(defaultDate);
   const [deleteConfirm, setDeleteConfirm] = useState(false);
   const [shake,         setShake]         = useState(false);
+  const [amtFocused,    setAmtFocused]    = useState(false);
+  const [dateFocused,   setDateFocused]   = useState(false);
   // § 2  KHR denomination hint state — shown when amount is not a multiple of KHR_STEP
   const [khrHint,       setKhrHint]       = useState(false);
   const amountRef    = useRef<HTMLInputElement>(null);
@@ -572,7 +587,8 @@ function EntryModal({ tx, selectedMonth, monthBalance, totalUSD: currentTotal, c
 
   const parsedAmt  = currency === "KHR" ? parseInt(rawAmount, 10) || 0 : parseFloat(rawAmount) || 0;
   const previewUSD = toUSD(rawAmount);
-  const borderColor = shake ? "#ef4444" : khrHint ? "#f59e0b" : parsedAmt > 0 ? "var(--accent-border)" : "var(--color-border)";
+  const borderColor = shake ? "#ef4444" : khrHint ? "#f59e0b" : amtFocused ? "var(--accent)" : parsedAmt > 0 ? "var(--accent-border)" : "var(--color-border)";
+  const amtBoxShadow = amtFocused && !shake && !khrHint ? "0 0 0 3px var(--accent-muted)" : "none";
 
   // Adaptive font size — shrinks as the display value gets longer to prevent overflow
   const displayVal = currency === "KHR" ? formatKHRDisplay(rawAmount) : rawAmount;
@@ -583,20 +599,26 @@ function EntryModal({ tx, selectedMonth, monthBalance, totalUSD: currentTotal, c
   const wouldExceed = !tx && monthBalance > 0 && previewUSD > 0
     && pin2(currentTotal + previewUSD) > monthBalance;
 
+  const modalMode = getModalAnim();
   return (
     <motion.div
       initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-      style={{ position: "fixed", inset: 0, background: "rgba(5,7,12,0.9)", zIndex: 200, display: "flex", alignItems: "flex-end" }}
+      className="modal-backdrop"
+      style={{ position: "fixed", inset: 0, background: "rgba(5,7,12,0.9)", zIndex: 200, display: "flex" }}
       onClick={onClose}
     >
       <motion.div
         ref={modalRef}
-        initial={{ y: "100%" }} animate={{ y: 0 }} exit={{ y: "100%" }}
+        initial={modalMode === "center" ? MODAL_ENTER_CENTER : MODAL_ENTER_SHEET}
+        animate={modalMode === "center" ? MODAL_ANIM_CENTER  : MODAL_ANIM_SHEET}
+        exit={modalMode   === "center" ? MODAL_EXIT_CENTER   : MODAL_EXIT_SHEET}
         transition={{ type: "spring", damping: 28, stiffness: 300 }}
-        style={{ background: "var(--color-bg-card)", borderRadius: "24px 24px 0 0", padding: "28px 28px 44px", width: "100%", border: "1px solid var(--color-border-mid)", borderBottom: "none", maxWidth: 480, margin: "0 auto" }}
+        className="modal-sheet"
+        style={{ background: "var(--color-bg-card)", padding: "28px 24px 44px", width: "100%", border: "1px solid var(--color-border-mid)", maxWidth: 480, margin: "0 auto" }}
         onClick={(e) => e.stopPropagation()}
       >
-        <div style={{ width: 40, height: 4, background: "var(--color-border-mid)", borderRadius: 2, margin: "0 auto 24px" }} />
+        {/* Drag handle — only on mobile bottom-sheet */}
+        {modalMode === "sheet" && <div style={{ width: 40, height: 4, background: "var(--color-border-mid)", borderRadius: 2, margin: "0 auto 24px" }} />}
 
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
           <span style={{ fontSize: 22, fontWeight: 600, color: "var(--color-text-hi)", letterSpacing: "-0.01em", fontFamily: "var(--font-headline)", lineHeight: 1.2 }}>
@@ -645,17 +667,21 @@ function EntryModal({ tx, selectedMonth, monthBalance, totalUSD: currentTotal, c
                 ? handleKHRChange(e.target.value)
                 : setRawAmount(sanitizeNum(e.target.value))
             }
-            onBlur={handleAmountBlur}
+            onFocus={() => setAmtFocused(true)}
+            onBlur={() => { setAmtFocused(false); handleAmountBlur(); }}
             onWheel={(e) => e.currentTarget.blur()}
             placeholder={currency === "USD" ? "0.00" : "0"}
+            className="focus-input"
             style={{
               width: "100%", boxSizing: "border-box",
-              background: "var(--color-bg-input)", border: `2px solid ${borderColor}`,
-              borderRadius: 14,
-              padding: rawAmount ? "16px 44px 16px 50px" : "16px 16px 16px 50px",
+              background: "var(--color-bg-input)",
+              border: `1.5px solid ${borderColor}`,
+              borderRadius: 12,
+              padding: "14px 44px 14px 50px",
               fontSize: amountFontSize, fontWeight: 800, color: "var(--color-text-hi)", outline: "none",
               fontFamily: "var(--font-mono)",
-              transition: "border-color 0.2s, font-size 0.12s ease",
+              boxShadow: amtBoxShadow,
+              transition: "border-color 0.18s, box-shadow 0.18s, font-size 0.12s ease",
             }}
           />
 
@@ -722,7 +748,7 @@ function EntryModal({ tx, selectedMonth, monthBalance, totalUSD: currentTotal, c
           placeholder="Note (optional, max 100 chars)..."
           maxLength={100}
           className="focus-input"
-          style={{ width: "100%", boxSizing: "border-box", background: "var(--color-bg-input)", border: "1.5px solid var(--color-border)", borderRadius: 12, padding: "12px 16px", fontSize: 16, fontFamily: "var(--font-body)", lineHeight: 1.5, color: "var(--color-text-hi)", outline: "none", marginBottom: 16 }}
+          style={{ width: "100%", boxSizing: "border-box", background: "var(--color-bg-input)", border: "1.5px solid var(--color-border)", borderRadius: 12, padding: "14px 16px", fontSize: 16, fontFamily: "var(--font-body)", lineHeight: 1.5, color: "var(--color-text-hi)", outline: "none", marginBottom: 16 }}
         />
 
         {/* ── Date picker — article technique: full-area transparent overlay ──
@@ -738,15 +764,19 @@ function EntryModal({ tx, selectedMonth, monthBalance, totalUSD: currentTotal, c
 
           {/* ── Display layer (behind, pointer-events:none) ── */}
           <div
+            className="focus-input"
             style={{
               display: "flex", alignItems: "center",
               background: "var(--color-bg-input)",
-              border: "1.5px solid var(--color-border)",
               borderRadius: 12,
               padding: "14px 16px",
               minHeight: 48,
               pointerEvents: "none",
               userSelect: "none",
+              ...(dateFocused ? {
+                borderColor: "var(--accent)",
+                boxShadow: "0 0 0 3px var(--accent-muted)",
+              } : {}),
             }}
           >
             <span style={{
@@ -778,6 +808,8 @@ function EntryModal({ tx, selectedMonth, monthBalance, totalUSD: currentTotal, c
             value={date}
             max={localDateString()}
             onChange={(e) => setDate(e.target.value)}
+            onFocus={() => setDateFocused(true)}
+            onBlur={() => setDateFocused(false)}
             style={{
               position: "absolute",
               inset: 0,
@@ -911,6 +943,9 @@ export default function ApsaraSpendPage() {
   // K3 — Splash is shown until isLoaded fires + 400ms grace period.
   // Covers localStorage hydration so user never sees an empty/default-state flash.
   const [showSplash,       setShowSplash]       = useState(true);
+  // Responsive modal animation: bottom-sheet on mobile, centred on tablet+
+  // Computed once per render cycle — all modals reference this same value
+  const pageModalMode = getModalAnim();
   const [data,             setData]             = useState<AppData>(defaultData);
   const [storageCorrupted, setStorageCorrupted] = useState(false);
   const [selectedMonth,    setSelectedMonth]    = useState(todayMonthKey());
@@ -1837,7 +1872,17 @@ export default function ApsaraSpendPage() {
         .text-lo   { color: var(--color-text-lo)    !important; }
 
         /* Focus ring uses accent var */
-        .focus-input:focus { border-color: var(--accent-border) !important; }
+        /* Input field — shared style for default + focus states              */
+        /* Default: subtle border. Focus: accent border + faint glow ring.    */
+        .focus-input {
+          border: 1.5px solid var(--color-border) !important;
+          transition: border-color 0.18s, box-shadow 0.18s !important;
+        }
+        .focus-input:focus {
+          border-color: var(--accent) !important;
+          box-shadow: 0 0 0 3px var(--accent-muted) !important;
+          outline: none !important;
+        }
 
         /* Remove browser default focus outline on Settings theme tab buttons */
         button:focus { outline: none; }
@@ -1943,7 +1988,15 @@ export default function ApsaraSpendPage() {
           }
         }
 
-        /* ── Date picker — full-width mobile, auto-width on tablet+ ─────── */
+        /* ── Responsive modals: bottom-sheet on mobile, centred on tablet+ ── */
+        /* Mobile default: sheet slides up from bottom                         */
+        .modal-backdrop   { align-items: flex-end !important; }
+        .modal-sheet      { border-radius: 24px 24px 0 0 !important; border-bottom: none !important; max-height: 92dvh; overflow-y: auto; }
+        /* Tablet+: centred floating dialog                                    */
+        @media (min-width: 768px) {
+          .modal-backdrop  { align-items: center !important; justify-content: center !important; padding: 32px !important; }
+          .modal-sheet     { border-radius: 20px !important; border-bottom: 1px solid var(--color-border-mid) !important; max-height: 88dvh; }
+        }
         .date-input { width: 100%; box-sizing: border-box; }
         @media (min-width: 768px) {
           .date-input { width: auto; min-width: 200px; }
@@ -2412,15 +2465,20 @@ export default function ApsaraSpendPage() {
           {/* ── Set Budget Modal — O3 ── */}
           {showBudgetModal && (
             <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-              style={{ position: "fixed", inset: 0, background: "rgba(5,7,12,0.92)", zIndex: 250, display: "flex", alignItems: "flex-end" }}
+              className="modal-backdrop"
+              style={{ position: "fixed", inset: 0, background: "rgba(5,7,12,0.92)", zIndex: 250, display: "flex" }}
               onClick={() => setShowBudgetModal(false)}>
-              <motion.div ref={budgetModalRef} initial={{ y: "100%" }} animate={{ y: 0 }} exit={{ y: "100%" }}
+              <motion.div ref={budgetModalRef}
+                initial={pageModalMode === "center" ? MODAL_ENTER_CENTER : MODAL_ENTER_SHEET}
+                animate={pageModalMode === "center" ? MODAL_ANIM_CENTER  : MODAL_ANIM_SHEET}
+                exit={pageModalMode   === "center" ? MODAL_EXIT_CENTER   : MODAL_EXIT_SHEET}
                 transition={{ type: "spring", damping: 28, stiffness: 300 }}
+                className="modal-sheet"
                 role="dialog" aria-modal="true" aria-label={monthBalance > 0 ? "Update Monthly Budget" : "Set Monthly Budget"}
-                style={{ background: "var(--color-bg-card)", borderRadius: "24px 24px 0 0", padding: "28px 28px 56px", width: "100%", border: "1px solid var(--color-border-mid)", borderBottom: "none", maxWidth: 480, margin: "0 auto" }}
+                style={{ background: "var(--color-bg-card)", padding: "28px 28px 56px", width: "100%", border: "1px solid var(--color-border-mid)", maxWidth: 480, margin: "0 auto" }}
                 onClick={(e) => e.stopPropagation()}>
 
-                <div style={{ width: 40, height: 4, background: "var(--color-border-mid)", borderRadius: 2, margin: "0 auto 24px" }} />
+                {pageModalMode === "sheet" && <div style={{ width: 40, height: 4, background: "var(--color-border-mid)", borderRadius: 2, margin: "0 auto 24px" }} />}
 
                 {/* A2 — Dynamic header: Set vs Update */}
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
@@ -2496,14 +2554,19 @@ export default function ApsaraSpendPage() {
           {/* ── Settings sheet — data management only ── */}
           {showSettings && (
             <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-              style={{ position: "fixed", inset: 0, background: "rgba(5,7,12,0.88)", zIndex: 200, display: "flex", alignItems: "flex-end" }}
+              className="modal-backdrop"
+              style={{ position: "fixed", inset: 0, background: "rgba(5,7,12,0.88)", zIndex: 200, display: "flex" }}
               onClick={() => { setShowSettings(false); setResetConfirm(false); }}>
-              <motion.div ref={settingsModalRef} initial={{ y: "100%" }} animate={{ y: 0 }} exit={{ y: "100%" }}
+              <motion.div ref={settingsModalRef}
+                initial={pageModalMode === "center" ? MODAL_ENTER_CENTER : MODAL_ENTER_SHEET}
+                animate={pageModalMode === "center" ? MODAL_ANIM_CENTER  : MODAL_ANIM_SHEET}
+                exit={pageModalMode   === "center" ? MODAL_EXIT_CENTER   : MODAL_EXIT_SHEET}
                 transition={{ type: "spring", damping: 28, stiffness: 280 }}
+                className="modal-sheet"
                 role="dialog" aria-modal="true" aria-label="Settings"
-                style={{ background: "var(--color-bg-card)", borderRadius: "22px 22px 0 0", padding: "28px 28px 56px", width: "100%", border: "1px solid var(--color-border)", borderBottom: "none", maxWidth: 480, margin: "0 auto" }}
+                style={{ background: "var(--color-bg-card)", padding: "28px 28px 56px", width: "100%", border: "1px solid var(--color-border)", maxWidth: 480, margin: "0 auto" }}
                 onClick={(e) => e.stopPropagation()}>
-                <div style={{ width: 36, height: 4, background: "var(--color-border-mid)", borderRadius: 2, margin: "0 auto 24px" }} />
+                {pageModalMode === "sheet" && <div style={{ width: 36, height: 4, background: "var(--color-border-mid)", borderRadius: 2, margin: "0 auto 24px" }} />}
 
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 24 }}>
                   <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
@@ -2677,8 +2740,6 @@ export default function ApsaraSpendPage() {
             </motion.div>
           )}
         </AnimatePresence>
-
-        {/* ════ TOAST — role=alert announces to screen readers (A1) ════ */}
         <AnimatePresence>
           {toast && (
             <motion.div key={toast.msg}
