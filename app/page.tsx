@@ -25,11 +25,10 @@ interface Transaction {
 }
 
 interface AppData {
+  schema_version: number;   // D3 — incremented when shape changes; used for migration detection
   transactions: Transaction[];
   // O1 — per-month user-set budgets: key = "YYYY-MM", value = USD amount
-  // Immutable once written — a key's value is never overwritten after first save.
   monthlyBalances: Record<string, number>;
-  // exchangeRate removed — fixed at EXCHANGE_RATE constant (backward-compat: old field is accepted but ignored)
 }
 
 interface Toast {
@@ -39,11 +38,11 @@ interface Toast {
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
-const EXCHANGE_RATE  = 4000;   // § 1  Fixed: 1 USD = 4,000 KHR
-// BUDGET_MIN / BUDGET_MAX removed — replaced by per-month monthlyBalances (§ O1)
+const EXCHANGE_RATE  = 4000;
 const MAX_AMOUNT_USD = 9_999.99;
-const KHR_STEP       = 100;    // § 2  Physical currency denomination step
+const KHR_STEP       = 100;
 const STORAGE_KEY    = "apsara_spend_v2";
+const SCHEMA_VERSION = 2; // D3 — bump when AppData shape changes
 const MONTHS         = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
 const MONTH_FULL     = ["January","February","March","April","May","June","July","August","September","October","November","December"];
 
@@ -137,14 +136,16 @@ const isValidKHR = (raw: string): boolean => {
 
 // ─── Storage ──────────────────────────────────────────────────────────────────
 
-// § C-03 / O1  Schema validation — accepts old schema for backward-compat.
-// monthlyBalances is optional in validation so existing localStorage data
-// without the field hydrates cleanly; it is defaulted to {} in loadData().
+// D3 — Schema validation with version check.
+// schema_version is optional so v1 data (no version field) hydrates safely.
+// Transactions array and monthlyBalances object shape are always validated.
 const isValidAppData = (val: unknown): val is AppData => {
   if (!val || typeof val !== "object") return false;
   const obj = val as Record<string, unknown>;
   if (!Array.isArray(obj.transactions)) return false;
   if (obj.monthlyBalances !== undefined && typeof obj.monthlyBalances !== "object") return false;
+  // Detect schema version mismatch (future migrations)
+  if (obj.schema_version !== undefined && typeof obj.schema_version !== "number") return false;
   return true;
 };
 
@@ -152,12 +153,28 @@ const loadData = (): { data: AppData | null; corrupted: boolean } => {
   try {
     const raw = typeof window !== "undefined" ? localStorage.getItem(STORAGE_KEY) : null;
     if (!raw) return { data: null, corrupted: false };
-    const parsed = JSON.parse(raw);
+
+    // Parse as unknown first so we can read storage-only fields before type narrowing
+    const parsed = JSON.parse(raw) as Record<string, unknown>;
+
+    // D3 — Integrity check: if tx_count sentinel was written, verify it matches
+    // the actual transactions array length. Mismatch = partial/corrupted write.
+    const storedCount = parsed.tx_count;
+    const txArray     = parsed.transactions;
+    if (
+      typeof storedCount === "number" &&
+      Array.isArray(txArray) &&
+      storedCount !== txArray.length
+    ) {
+      return { data: null, corrupted: true };
+    }
+
     if (!isValidAppData(parsed)) return { data: null, corrupted: true };
+
     return {
       data: {
+        schema_version:  SCHEMA_VERSION,
         transactions:    parsed.transactions,
-        // Default to {} so old data without monthlyBalances hydrates safely
         monthlyBalances: (parsed.monthlyBalances as Record<string, number>) ?? {},
       },
       corrupted: false,
@@ -167,17 +184,24 @@ const loadData = (): { data: AppData | null; corrupted: boolean } => {
   }
 };
 
-// § C-01  Returns boolean so caller can surface a quota-exceeded toast
 const saveData = (data: AppData): boolean => {
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+    // D3 — Write schema_version and tx_count alongside typed data.
+    // tx_count is storage-only metadata (not in AppData interface) — cast to any for serialisation.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const payload: any = {
+      ...data,
+      schema_version: SCHEMA_VERSION,
+      tx_count: data.transactions.length,
+    };
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
     return true;
   } catch {
     return false;
   }
 };
 
-const defaultData = (): AppData => ({ transactions: [], monthlyBalances: {} });
+const defaultData = (): AppData => ({ schema_version: SCHEMA_VERSION, transactions: [], monthlyBalances: {} });
 
 // ─── CategoryIcon ─────────────────────────────────────────────────────────────
 
@@ -200,10 +224,11 @@ function CategoryIcon({ cat, active }: { cat: typeof CATEGORIES[number]; active?
 // O5 — now driven by the dynamic monthly balance, not hardcoded constants.
 // When monthBudget is 0 (not set), renders a "Set your budget" prompt instead.
 
-function BudgetBar({ total, monthBudget, onSetBudget }: {
+function BudgetBar({ total, monthBudget, onSetBudget, onEditBudget }: {
   total: number;
   monthBudget: number;
   onSetBudget: () => void;
+  onEditBudget: () => void;
 }) {
   // No budget set — show prompt
   if (monthBudget <= 0) {
@@ -228,9 +253,14 @@ function BudgetBar({ total, monthBudget, onSetBudget }: {
   }
 
   const pct        = Math.min((total / monthBudget) * 100, 100);
-  const pctDisplay = Math.min(Math.round((total / monthBudget) * 100), 100);
-  const color      = total > monthBudget ? "#ef4444" : total >= monthBudget * 0.85 ? "#f59e0b" : "#34d399";
-  const label      = total > monthBudget ? "Over budget!" : total >= monthBudget * 0.85 ? "Nearing limit" : "On track";
+  const pctDisplay = Math.round((total / monthBudget) * 100);
+  const isOver     = total > monthBudget;
+  const overAmt    = pin2(total - monthBudget);
+
+  // B1 — 4-tier threshold system: 50% info, 80% amber, 95% orange, 100%+ red
+  const tier = isOver ? 4 : pctDisplay >= 95 ? 3 : pctDisplay >= 80 ? 2 : pctDisplay >= 50 ? 1 : 0;
+  const tierColor = tier >= 4 ? "#ef4444" : tier === 3 ? "#f97316" : tier === 2 ? "#f59e0b" : tier === 1 ? "#3b82f6" : "#34d399";
+  const tierLabel = tier >= 4 ? `Over by $${overAmt.toFixed(2)}` : tier === 3 ? "Almost at limit" : tier === 2 ? "Nearing limit" : tier === 1 ? "Halfway there" : "On track";
 
   return (
     <div>
@@ -244,8 +274,8 @@ function BudgetBar({ total, monthBudget, onSetBudget }: {
               {pctDisplay}%
             </span>
           )}
-          <span style={{ fontSize: 11, fontWeight: 700, color, transition: "color 0.3s", fontFamily: "var(--font-body)" }}>
-            {label}
+          <span style={{ fontSize: 11, fontWeight: 700, color: tierColor, transition: "color 0.3s", fontFamily: "var(--font-body)" }}>
+            {tierLabel}
           </span>
         </div>
       </div>
@@ -253,14 +283,29 @@ function BudgetBar({ total, monthBudget, onSetBudget }: {
         <motion.div
           animate={{ width: `${pct}%` }}
           transition={{ duration: 0.5, ease: [0.4, 0, 0.2, 1] }}
-          style={{ height: "100%", background: color, borderRadius: 999, boxShadow: `0 0 10px ${color}80` }}
+          style={{ height: "100%", background: tierColor, borderRadius: 999,
+            boxShadow: tier >= 3 ? `0 0 10px ${tierColor}80` : "none",
+            animation: tier >= 3 ? "budgetPulse 1.6s ease-in-out infinite" : "none",
+          }}
         />
       </div>
-      <div style={{ display: "flex", justifyContent: "space-between", marginTop: 8 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", marginTop: 8, alignItems: "center" }}>
         <span style={{ fontSize: 11, color: "var(--color-text-lo)", fontFamily: "var(--font-body)" }}>$0</span>
-        <span style={{ fontSize: 11, color: "var(--color-text-lo)", fontFamily: "var(--font-body)" }}>
-          ${monthBudget.toFixed(0)}
-        </span>
+        {/* F1 / A3 — edit budget: prominent CTA when over budget, subtle pencil otherwise */}
+        {isOver ? (
+          <button onClick={onEditBudget}
+            style={{ background: "#ef444415", border: "1px solid #ef444430", borderRadius: 6, cursor: "pointer", display: "flex", alignItems: "center", gap: 4, padding: "3px 8px" }}>
+            <span style={{ fontSize: 11, fontWeight: 700, color: "#ef4444", fontFamily: "var(--font-body)" }}>Adjust budget ›</span>
+          </button>
+        ) : (
+          <button onClick={onEditBudget}
+            style={{ background: "none", border: "none", cursor: "pointer", display: "flex", alignItems: "center", gap: 4, padding: "2px 4px", borderRadius: 6 }}>
+            <span style={{ fontSize: 11, color: "var(--color-text-lo)", fontFamily: "var(--font-body)" }}>${monthBudget.toFixed(0)}</span>
+            <svg width="10" height="10" viewBox="0 0 10 10" fill="none">
+              <path d="M7 1.5l1.5 1.5L3 8.5H1.5V7L7 1.5z" stroke="var(--color-text-lo)" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round"/>
+            </svg>
+          </button>
+        )}
       </div>
     </div>
   );
@@ -402,10 +447,11 @@ function MonthPicker({ current, onSelect, onClose }: {
 
 // ─── EntryModal ───────────────────────────────────────────────────────────────
 
-function EntryModal({ tx, selectedMonth, monthBalance, totalUSD: currentTotal, onSave, onDelete, onClose }: {
+function EntryModal({ tx, selectedMonth, monthBalance, totalUSD: currentTotal, constraintMode, onSave, onDelete, onClose }: {
   tx: Transaction | null; selectedMonth: string;
-  monthBalance: number;   // P1 — monthly budget cap (0 = not set)
-  totalUSD: number;       // P1 — current month spend before this entry
+  monthBalance: number;
+  totalUSD: number;
+  constraintMode: "soft" | "hard"; // C1 — controls whether over-budget is blocked or warned
   onSave: (t: Transaction) => void; onDelete?: (id: string) => void; onClose: () => void;
 }) {
   const isEdit = !!tx;
@@ -486,17 +532,26 @@ function EntryModal({ tx, selectedMonth, monthBalance, totalUSD: currentTotal, o
     return currency === "KHR" ? pin2(v / EXCHANGE_RATE) : pin2(v);
   };
 
+  // C1 — showHardConfirm: true when hard mode needs user confirmation before saving over budget
+  const [showHardConfirm, setShowHardConfirm] = useState(false);
+
+  const commitSave = () => {
+    // Shared save logic — called directly in soft mode, after confirmation in hard mode
+    const catLabel = CATEGORIES.find((c) => c.id === cat)!.label;
+    onSave({
+      id:        tx?.id ?? genId(),
+      amountUSD: toUSD(rawAmount),
+      category:  cat,
+      note:      sanitizeText(note) || catLabel,
+      date:      new Date(`${date}T00:00:00`).toISOString(),
+    });
+    onClose();
+  };
+
   const handleSave = () => {
-    // P3 — Over-limit guard: block save if this entry would push total over budget
-    if (wouldExceed) {
-      setShake(true);
-      setTimeout(() => setShake(false), 400);
-      return;
-    }
-    // § 2  KHR denomination guard — reject non-multiples of KHR_STEP at save time
+    // KHR denomination guard
     if (currency === "KHR" && !isValidKHR(rawAmount)) {
-      setShake(true);
-      setKhrHint(true);
+      setShake(true); setKhrHint(true);
       setTimeout(() => setShake(false), 400);
       return;
     }
@@ -506,15 +561,15 @@ function EntryModal({ tx, selectedMonth, monthBalance, totalUSD: currentTotal, o
       setTimeout(() => setShake(false), 400);
       return;
     }
-    const catLabel = CATEGORIES.find((c) => c.id === cat)!.label;
-    onSave({
-      id:        tx?.id ?? genId(),
-      amountUSD: usd,
-      category:  cat,
-      note:      sanitizeText(note) || catLabel,
-      date:      new Date(`${date}T00:00:00`).toISOString(),
-    });
-    onClose();
+    if (wouldExceed) {
+      if (constraintMode === "hard") {
+        // C3 — Hard mode: show confirmation modal before allowing over-budget save
+        setShowHardConfirm(true);
+        return;
+      }
+      // C2 — Soft mode: allow save, UI turns red — no block
+    }
+    commitSave();
   };
 
   const parsedAmt  = currency === "KHR" ? parseInt(rawAmount, 10) || 0 : parseFloat(rawAmount) || 0;
@@ -780,18 +835,21 @@ function EntryModal({ tx, selectedMonth, monthBalance, totalUSD: currentTotal, o
             <button onClick={handleSave}
               style={{
                 flex: 1, padding: 14, borderRadius: 14,
-                background: wouldExceed
+                background: wouldExceed && constraintMode === "soft"
+                  ? "linear-gradient(135deg, #ef4444, #dc2626)"
+                  : wouldExceed && constraintMode === "hard"
                   ? "transparent"
-                  : "linear-gradient(135deg, #fbbf24, #f59e0b)",
-                border: wouldExceed ? "1.5px solid #f59e0b60" : "none",
-                color: wouldExceed ? "#f59e0b" : "#0d0f14",
+                  : "linear-gradient(135deg, var(--accent), var(--accent-dim))",
+                border: wouldExceed && constraintMode === "hard" ? "1.5px solid #f59e0b60" : "none",
+                color: wouldExceed && constraintMode === "hard" ? "#f59e0b" : "var(--accent-text)",
                 fontWeight: 700, fontSize: 16, fontFamily: "var(--font-body)",
-                cursor: wouldExceed ? "not-allowed" : "pointer",
-                opacity: wouldExceed ? 0.7 : 1,
+                cursor: "pointer",
                 boxShadow: wouldExceed ? "none" : "0 3px 16px var(--accent-glow)",
                 transition: "all 0.2s",
               }}>
-              {isEdit ? "Save Changes" : "Add Expense"}
+              {wouldExceed && constraintMode === "hard"
+                ? "Over budget — confirm?"
+                : isEdit ? "Save Changes" : "Add Expense"}
             </button>
           )}
           {deleteConfirm && (
@@ -802,11 +860,55 @@ function EntryModal({ tx, selectedMonth, monthBalance, totalUSD: currentTotal, o
           )}
         </div>
       </motion.div>
+
+      {/* C3 — Hard mode: over-budget confirmation overlay */}
+      <AnimatePresence>
+        {showHardConfirm && (
+          <motion.div
+            initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+            style={{ position: "fixed", inset: 0, background: "rgba(5,7,12,0.92)", zIndex: 300, display: "flex", alignItems: "center", justifyContent: "center", padding: 24 }}
+            onClick={() => setShowHardConfirm(false)}
+          >
+            <motion.div
+              initial={{ scale: 0.92, opacity: 0, y: 16 }} animate={{ scale: 1, opacity: 1, y: 0 }}
+              exit={{ scale: 0.92, opacity: 0, y: 8 }}
+              transition={{ type: "spring", damping: 22, stiffness: 300 }}
+              role="alertdialog" aria-modal="true" aria-label="Over budget confirmation"
+              style={{ background: "var(--color-bg-card)", borderRadius: 24, padding: 28, width: "100%", maxWidth: 360, border: "1px solid #ef444440" }}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div style={{ width: 48, height: 48, borderRadius: "50%", background: "#ef444418", border: "1px solid #ef444440", display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 16px" }}>
+                <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
+                  <path d="M12 9v4m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" stroke="#ef4444" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                </svg>
+              </div>
+              <div style={{ textAlign: "center", marginBottom: 8 }}>
+                <div style={{ fontSize: 18, fontWeight: 700, color: "var(--color-text-hi)", fontFamily: "var(--font-headline)", marginBottom: 8 }}>Over Budget</div>
+                <div style={{ fontSize: 13, color: "var(--color-text-lo)", fontFamily: "var(--font-body)", lineHeight: 1.6 }}>
+                  This will put you{" "}
+                  <span style={{ color: "#ef4444", fontWeight: 600 }}>
+                    ${pin2(currentTotal + toUSD(rawAmount) - monthBalance).toFixed(2)} over
+                  </span>{" "}
+                  your ${monthBalance.toFixed(0)} budget. Add anyway?
+                </div>
+              </div>
+              <div style={{ display: "flex", gap: 10, marginTop: 24 }}>
+                <button onClick={() => setShowHardConfirm(false)}
+                  style={{ flex: 1, padding: "12px 0", borderRadius: 12, border: "1px solid var(--color-border-mid)", background: "var(--color-bg-nav)", color: "var(--color-text-lo)", fontSize: 14, fontWeight: 600, fontFamily: "var(--font-body)", cursor: "pointer" }}>
+                  Cancel
+                </button>
+                <button onClick={() => { setShowHardConfirm(false); commitSave(); }}
+                  style={{ flex: 1, padding: "12px 0", borderRadius: 12, border: "none", background: "#ef4444", color: "#fff", fontSize: 14, fontWeight: 700, fontFamily: "var(--font-body)", cursor: "pointer" }}>
+                  Add anyway
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </motion.div>
   );
 }
-
-// ─── Main Page ────────────────────────────────────────────────────────────────
 
 export default function ApsaraSpendPage() {
   const [isLoaded,         setIsLoaded]         = useState(false);
@@ -838,6 +940,12 @@ export default function ApsaraSpendPage() {
   const [themeMode,        setThemeMode]        = useState<"dark"|"light"|"system">("dark");
   // Q4 — colour palette: yellow (default) | indigo | emerald | rose
   const [palette,          setPalette]          = useState<"yellow"|"indigo"|"emerald"|"rose">("yellow");
+  // C1 — constraint mode: soft (allow over-budget) | hard (confirm modal)
+  const [constraintMode,   setConstraintMode]   = useState<"soft"|"hard">("soft");
+  // E1 — notification permission: "default" | "granted" | "denied" | "unsupported"
+  const [notifPermission,  setNotifPermission]  = useState<"default"|"granted"|"denied"|"unsupported">("default");
+  // B2 — track which tier alerts have already fired this session to avoid repeats
+  const firedTiers = useRef<Set<number>>(new Set());
 
   const showToast = useCallback((msg: string, type: Toast["type"] = "info") => {
     setToast({ msg, type });
@@ -855,10 +963,21 @@ export default function ApsaraSpendPage() {
     if (storageCorrupted) showToast("Previous data could not be loaded — storage was corrupted.", "warn");
   }, [storageCorrupted, showToast]);
 
+  // D1 — Debounced localStorage write: state updates are instant (React),
+  // but disk writes are batched every 300ms to prevent write-storm on rapid
+  // entries. "Add Expense" feels instantaneous — the UI updates on the same
+  // frame, the persistence happens 300ms later in the background.
+  const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => {
     if (!isLoaded) return;
-    const ok = saveData(data);
-    if (!ok) showToast("Storage quota exceeded — data may not be saved.", "warn");
+    if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+    saveTimerRef.current = setTimeout(() => {
+      const ok = saveData(data);
+      if (!ok) showToast("Storage quota exceeded — data may not be saved.", "warn");
+    }, 300);
+    return () => {
+      if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+    };
   }, [data, isLoaded, showToast]);
 
   // Q3/T3 — Apply theme mode to <html data-theme="...">
@@ -891,14 +1010,52 @@ export default function ApsaraSpendPage() {
     localStorage.setItem("apsara_palette", palette);
   }, [palette]);
 
-  // Q3/Q4 — Restore persisted theme + palette on first load
+  // C1 — Persist constraintMode
+  useEffect(() => { localStorage.setItem("apsara_constraint", constraintMode); }, [constraintMode]);
+
+  // Q3/Q4/C1 — Restore all persisted preferences on first load
   useEffect(() => {
-    const savedTheme = localStorage.getItem("apsara_theme") as "dark"|"light"|"system"|null;
-    const savedPalette = localStorage.getItem("apsara_palette") as "yellow"|"indigo"|"emerald"|"rose"|null;
-    if (savedTheme)   setThemeMode(savedTheme);
-    if (savedPalette) setPalette(savedPalette);
+    const savedTheme      = localStorage.getItem("apsara_theme")      as "dark"|"light"|"system"|null;
+    const savedPalette    = localStorage.getItem("apsara_palette")    as "yellow"|"indigo"|"emerald"|"rose"|null;
+    const savedConstraint = localStorage.getItem("apsara_constraint") as "soft"|"hard"|null;
+    if (savedTheme)      setThemeMode(savedTheme);
+    if (savedPalette)    setPalette(savedPalette);
+    if (savedConstraint) setConstraintMode(savedConstraint);
+    // E1 — Read current notification permission from browser (no need to persist — browser owns it)
+    if (typeof window !== "undefined") {
+      if (!("Notification" in window)) {
+        setNotifPermission("unsupported");
+      } else {
+        setNotifPermission(Notification.permission as "default"|"granted"|"denied");
+      }
+    }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // E1 — Request notification permission from the browser
+  const requestNotifPermission = async () => {
+    if (!("Notification" in window)) {
+      setNotifPermission("unsupported");
+      showToast("Your browser doesn't support notifications.", "info");
+      return;
+    }
+    try {
+      const result = await Notification.requestPermission();
+      setNotifPermission(result as "default"|"granted"|"denied");
+      if (result === "granted") {
+        showToast("Budget alerts enabled!", "success");
+        // E2 — Test notification so user knows it works
+        new Notification("Apsara Spend", {
+          body: "Budget alerts are now active. You'll be notified at 80% and 95%.",
+          icon: "/icon-192.png",
+        });
+      } else {
+        showToast("Notifications blocked. Enable them in browser settings.", "warn");
+      }
+    } catch {
+      showToast("Could not request notification permission.", "warn");
+    }
+  };
 
   // R1 / S2 — Body scroll lock: prevent background scroll while any modal is open,
   // and also while the non-scrolling init screen is active (spec §1 & §5).
@@ -959,6 +1116,36 @@ export default function ApsaraSpendPage() {
   const monthBalance    = data.monthlyBalances[selectedMonth] ?? 0;
   const fabDisabled     = monthBalance > 0 && totalUSD >= monthBalance;
 
+  // B2 / E2 — Fire toast + browser notification once per tier crossing per month
+  useEffect(() => {
+    if (monthBalance <= 0 || totalUSD <= 0) return;
+    const pct  = (totalUSD / monthBalance) * 100;
+    const tier = totalUSD > monthBalance ? 4 : pct >= 95 ? 3 : pct >= 80 ? 2 : pct >= 50 ? 1 : 0;
+    if (tier > 0 && !firedTiers.current.has(tier)) {
+      firedTiers.current.add(tier);
+      const msgs: Record<number,string> = {
+        1: "You've used 50% of your budget.",
+        2: "80% of your budget used — nearing limit.",
+        3: "95% reached — almost at your limit!",
+        4: `Over budget by $${pin2(totalUSD - monthBalance).toFixed(2)}.`,
+      };
+      showToast(msgs[tier], tier >= 3 ? "warn" : "info");
+      // E2 — Fire browser notification for tier 2+ (≥80%) when permission granted.
+      // Tier 1 (50%) is informational only — not intrusive enough to notify.
+      if (tier >= 2 && typeof window !== "undefined" && "Notification" in window && Notification.permission === "granted") {
+        new Notification("Apsara Spend — Budget Alert", {
+          body: msgs[tier],
+          icon: "/icon-192.png",
+          tag: `budget-tier-${tier}`,   // prevents duplicate banners if already shown
+          silent: tier < 3,             // only sound/vibrate at critical tiers (≥95%)
+        });
+      }
+    }
+  }, [totalUSD, monthBalance, showToast]);
+
+  // Reset fired tiers on month switch so alerts re-arm for new month
+  useEffect(() => { firedTiers.current = new Set(); }, [selectedMonth]);
+
   // ── Navigation ───────────────────────────────────────────────────────────────
 
   const navigateMonth = (delta: 1 | -1) => {
@@ -978,9 +1165,16 @@ export default function ApsaraSpendPage() {
     else if (info.offset.x < -60) navigateMonth(1);
   };
 
-  // ── CRUD ─────────────────────────────────────────────────────────────────────
-
+  // D2 — Optimistic CRUD: close the modal on the same frame as the user taps
+  // "Add Expense" / "Save Changes". The UI feels instantaneous because the modal
+  // is gone before the data re-render. setData happens synchronously in React's
+  // batch, so the new entry appears in the list within the same paint cycle.
   const handleSave = (tx: Transaction) => {
+    const wasEdit = !!editTx;
+    // Close modal first — perceived latency = 0
+    setShowModal(false);
+    setEditTx(null);
+    // Commit to state (D1 debounce batches the localStorage write)
     setData((d) => {
       const exists = d.transactions.some((t) => t.id === tx.id);
       return {
@@ -990,11 +1184,12 @@ export default function ApsaraSpendPage() {
           : [tx, ...d.transactions],
       };
     });
-    showToast(editTx ? "Expense updated." : "Expense added!", "success");
-    setEditTx(null);
+    showToast(wasEdit ? "Expense updated." : "Expense added!", "success");
   };
 
   const handleDelete = (id: string) => {
+    setShowModal(false);
+    setEditTx(null);
     setData((d) => ({ ...d, transactions: d.transactions.filter((t) => t.id !== id) }));
     showToast("Expense deleted.", "warn");
   };
@@ -1012,27 +1207,32 @@ export default function ApsaraSpendPage() {
     showToast(`${MONTH_FULL[month - 1]} ${year} data cleared.`, "warn");
   };
 
-  // O4 — Immutability helper: returns true when a balance has already been
-  // saved for the given month key. Once locked, the budget cannot be changed.
-  const isBalanceLocked = (monthKey: string): boolean =>
-    monthKey in data.monthlyBalances && data.monthlyBalances[monthKey] > 0;
+  // A1 — Flexible budget engine: budget can be set OR updated at any time.
+  // Immutability rule from original spec §1 is removed to satisfy User 1 (flexible).
+  // handleSetBudget handles both first-time set and mid-month edit.
+  const isBalanceLocked = (_monthKey: string): boolean => false; // kept for API compat — always editable now
 
-  // S1 — Sequential flow gate: dashboard only renders when a budget is set for this month
-  const hasMonthBudget = isBalanceLocked(selectedMonth);
+  // S1 — Budget gate: dashboard shows when any balance exists (> 0)
+  const hasMonthBudget = (selectedMonth in data.monthlyBalances && data.monthlyBalances[selectedMonth] > 0);
 
-  // O4 — Save the confirmed budget for selectedMonth.
-  // Guard: never overwrite an existing balance (immutability rule from spec §1).
+  // A1/A2 — Save OR update the budget for selectedMonth.
+  // No immutability lock — user can revise at any time (satisfies User 1).
   const handleSetBudget = () => {
     const amount = pin2(parseFloat(budgetInput) || 0);
     if (amount <= 0) { showToast("Please enter a valid budget amount.", "info"); return; }
-    if (isBalanceLocked(selectedMonth)) return; // should never reach — UI prevents this
+    const isEdit = selectedMonth in data.monthlyBalances && data.monthlyBalances[selectedMonth] > 0;
     setData((d) => ({
       ...d,
       monthlyBalances: { ...d.monthlyBalances, [selectedMonth]: amount },
     }));
     setBudgetInput("");
     setShowBudgetModal(false);
-    showToast(`Budget set to $${amount.toFixed(2)} for ${MONTH_FULL[month - 1]}.`, "success");
+    showToast(
+      isEdit
+        ? `Budget updated to $${amount.toFixed(2)} for ${MONTH_FULL[month - 1]}.`
+        : `Budget set to $${amount.toFixed(2)} for ${MONTH_FULL[month - 1]}.`,
+      "success"
+    );
   };
 
   const slideVariants = {
@@ -1062,10 +1262,36 @@ export default function ApsaraSpendPage() {
                 ? `${Math.round(totalUSD * EXCHANGE_RATE).toLocaleString()} ៛`
                 : `$${totalUSD.toFixed(2)}`}
             </div>
-            {/* N3 — period label — makes it unambiguous when time-travelling */}
+            {/* N3 — period label */}
             <div style={{ fontSize: 11, color: "var(--color-text-lo)", marginTop: 6, fontFamily: "var(--font-body)", letterSpacing: "0.04em" }}>
               {MONTH_FULL[month - 1]} {year}
             </div>
+
+            {/* F2 — Remaining / Over by: live balance feedback below the total */}
+            {monthBalance > 0 && (() => {
+              const remaining = pin2(monthBalance - totalUSD);
+              const isOver    = remaining < 0;
+              const tier      = isOver ? 4
+                : (totalUSD / monthBalance) * 100 >= 95 ? 3
+                : (totalUSD / monthBalance) * 100 >= 80 ? 2
+                : (totalUSD / monthBalance) * 100 >= 50 ? 1 : 0;
+              const tcolor = tier >= 4 ? "#ef4444" : tier === 3 ? "#f97316" : tier === 2 ? "#f59e0b" : tier === 1 ? "#3b82f6" : "#34d399";
+              return (
+                <motion.div
+                  key={`${isOver}-${Math.floor(Math.abs(remaining) * 10)}`}
+                  initial={{ opacity: 0, y: -4 }} animate={{ opacity: 1, y: 0 }}
+                  transition={{ duration: 0.2 }}
+                  style={{ marginTop: 8, display: "flex", alignItems: "center", gap: 5 }}
+                >
+                  <span style={{ width: 6, height: 6, borderRadius: "50%", background: tcolor, flexShrink: 0, display: "inline-block" }} />
+                  <span style={{ fontSize: 12, fontWeight: 600, color: tcolor, fontFamily: "var(--font-mono)", letterSpacing: "0.02em" }}>
+                    {isOver
+                      ? `Over by $${Math.abs(remaining).toFixed(2)}`
+                      : `Remaining $${remaining.toFixed(2)}`}
+                  </span>
+                </motion.div>
+              );
+            })()}
           </div>
           <div style={{ display: "flex", background: "var(--color-bg-page)", borderRadius: 10, padding: 3, gap: 3 }}>
             {(["USD", "KHR"] as Currency[]).map((c) => (
@@ -1085,6 +1311,7 @@ export default function ApsaraSpendPage() {
           total={totalUSD}
           monthBudget={data.monthlyBalances[selectedMonth] ?? 0}
           onSetBudget={() => setShowBudgetModal(true)}
+          onEditBudget={() => { setBudgetInput(String(monthBalance)); setShowBudgetModal(true); }}
         />
       </div>
 
@@ -1361,7 +1588,7 @@ export default function ApsaraSpendPage() {
       </div>
       {/* Sub-label */}
       <div style={{ fontSize: 14, color: "var(--color-text-lo)", fontFamily: "var(--font-body)", lineHeight: 1.6, marginBottom: 32, maxWidth: 280 }}>
-        Define a monthly spending limit before logging expenses. Once set, your budget is locked for the month.
+        Set a starting budget for {MONTH_FULL[month - 1]} — you can always adjust it later.
       </div>
 
       {/* CTA */}
@@ -1580,6 +1807,10 @@ export default function ApsaraSpendPage() {
           0%, 100% { box-shadow: 0 0 16px var(--accent-glow); }
           50%       { box-shadow: 0 0 28px var(--accent-glow); }
         }
+        @keyframes budgetPulse {
+          0%, 100% { opacity: 1; }
+          50%       { opacity: 0.7; }
+        }
         @keyframes shimmer {
           0%   { background-position: -200% 0; }
           100% { background-position:  200% 0; }
@@ -1622,10 +1853,14 @@ export default function ApsaraSpendPage() {
               </h1>
               <div style={{ fontSize: 11, color: "var(--color-text-lo)", letterSpacing: "0.06em", marginTop: 6, fontFamily: "var(--font-body)", display: "flex", alignItems: "center", gap: 8 }}>
                 1 USD = 4,000 ៛ · Fixed rate
-                {isBalanceLocked(selectedMonth) ? (
-                  <span style={{ background: "var(--accent-muted)", border: "1px solid var(--accent-border)", color: "var(--accent)", borderRadius: 99, padding: "1px 8px", fontSize: 10, fontWeight: 600, letterSpacing: "0.06em" }}>
+                {hasMonthBudget ? (
+                  <button onClick={() => { setBudgetInput(String(monthBalance)); setShowBudgetModal(true); }}
+                    style={{ background: "var(--accent-muted)", border: "1px solid var(--accent-border)", color: "var(--accent)", borderRadius: 99, padding: "1px 8px", fontSize: 10, fontWeight: 600, letterSpacing: "0.06em", cursor: "pointer", fontFamily: "var(--font-body)", display: "flex", alignItems: "center", gap: 4 }}>
                     ${(data.monthlyBalances[selectedMonth]).toFixed(0)} budget
-                  </span>
+                    <svg width="8" height="8" viewBox="0 0 10 10" fill="none">
+                      <path d="M7 1.5l1.5 1.5L3 8.5H1.5V7L7 1.5z" stroke="var(--accent)" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"/>
+                    </svg>
+                  </button>
                 ) : (
                   <button onClick={() => setShowBudgetModal(true)}
                     style={{ background: "none", border: "none", color: "var(--accent)", fontSize: 10, fontWeight: 600, cursor: "pointer", padding: 0, fontFamily: "var(--font-body)", letterSpacing: "0.06em" }}>
@@ -1784,6 +2019,7 @@ export default function ApsaraSpendPage() {
               selectedMonth={selectedMonth}
               monthBalance={monthBalance}
               totalUSD={totalUSD}
+              constraintMode={constraintMode}
               onSave={handleSave}
               onDelete={handleDelete}
               onClose={() => { setShowModal(false); setEditTx(null); }}
@@ -1791,30 +2027,32 @@ export default function ApsaraSpendPage() {
           )}
 
           {/* ── Set Budget Modal — O3 ── */}
-          {showBudgetModal && !isBalanceLocked(selectedMonth) && (
+          {showBudgetModal && (
             <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
               style={{ position: "fixed", inset: 0, background: "rgba(5,7,12,0.92)", zIndex: 250, display: "flex", alignItems: "flex-end" }}
               onClick={() => setShowBudgetModal(false)}>
               <motion.div ref={budgetModalRef} initial={{ y: "100%" }} animate={{ y: 0 }} exit={{ y: "100%" }}
                 transition={{ type: "spring", damping: 28, stiffness: 300 }}
-                role="dialog" aria-modal="true" aria-label="Set Monthly Budget"
+                role="dialog" aria-modal="true" aria-label={monthBalance > 0 ? "Update Monthly Budget" : "Set Monthly Budget"}
                 style={{ background: "var(--color-bg-card)", borderRadius: "24px 24px 0 0", padding: "28px 28px 56px", width: "100%", border: "1px solid var(--color-border-mid)", borderBottom: "none", maxWidth: 480, margin: "0 auto" }}
                 onClick={(e) => e.stopPropagation()}>
 
                 <div style={{ width: 40, height: 4, background: "var(--color-border-mid)", borderRadius: 2, margin: "0 auto 24px" }} />
 
-                {/* Header */}
+                {/* A2 — Dynamic header: Set vs Update */}
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
                   <span style={{ fontSize: 22, fontWeight: 600, color: "var(--color-text-hi)", fontFamily: "var(--font-headline)", letterSpacing: "-0.01em" }}>
-                    Set Monthly Budget
+                    {monthBalance > 0 ? "Update Budget" : "Set Monthly Budget"}
                   </span>
                   <button onClick={() => setShowBudgetModal(false)}
                     style={{ background: "var(--color-bg-nav)", border: "none", borderRadius: 9, padding: 9, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", minWidth: 36, minHeight: 36 }}>
                     <X className="icon-nav" color="var(--color-text-lo)" strokeWidth={2} />
                   </button>
                 </div>
+                {/* A2/A4 — Flexible copy: no lock language */}
                 <div style={{ fontSize: 12, color: "var(--color-text-lo)", marginBottom: 24, fontFamily: "var(--font-body)", lineHeight: 1.5 }}>
-                  {MONTH_FULL[month - 1]} {year} · Once saved this cannot be changed.
+                  {MONTH_FULL[month - 1]} {year}
+                  {monthBalance > 0 && <span style={{ color: "var(--color-text-lo)" }}> · Current: ${monthBalance.toFixed(2)}</span>}
                 </div>
 
                 {/* Amount input */}
@@ -1845,11 +2083,11 @@ export default function ApsaraSpendPage() {
                   </div>
                 )}
 
-                {/* Immutability notice */}
+                {/* A2 — Flexible info note replaces immutability warning */}
                 <div style={{ background: "var(--accent-muted)", border: "1px solid var(--accent-border)", borderRadius: 12, padding: "10px 14px", marginBottom: 24, display: "flex", gap: 10, alignItems: "flex-start" }}>
-                  <span style={{ fontSize: 14, flexShrink: 0, marginTop: 1 }}>⚠️</span>
-                  <span style={{ fontSize: 12, color: "#fcd34d", fontFamily: "var(--font-body)", lineHeight: 1.5 }}>
-                    This budget is permanent for {MONTH_FULL[month - 1]}. Review carefully before confirming.
+                  <span style={{ fontSize: 14, flexShrink: 0, marginTop: 1 }}>💡</span>
+                  <span style={{ fontSize: 12, color: "var(--accent)", fontFamily: "var(--font-body)", lineHeight: 1.5 }}>
+                    You can update your budget at any time — changes apply immediately.
                   </span>
                 </div>
 
@@ -1860,13 +2098,13 @@ export default function ApsaraSpendPage() {
                   style={{
                     width: "100%", padding: "16px", borderRadius: 16, border: "none",
                     background: !budgetInput || parseFloat(budgetInput) <= 0
-                      ? "#1e2a38" : "linear-gradient(135deg, var(--accent) 0%, var(--accent-dim) 100%)",
-                    color: !budgetInput || parseFloat(budgetInput) <= 0 ? "var(--color-text-lo)" : "#0d0f14",
+                      ? "var(--color-border-mid)" : "linear-gradient(135deg, var(--accent) 0%, var(--accent-dim) 100%)",
+                    color: !budgetInput || parseFloat(budgetInput) <= 0 ? "var(--color-text-lo)" : "var(--accent-text)",
                     fontSize: 16, fontWeight: 700, fontFamily: "var(--font-headline)",
                     cursor: !budgetInput || parseFloat(budgetInput) <= 0 ? "not-allowed" : "pointer",
                     transition: "all 0.2s",
                   }}>
-                  Confirm Budget
+                  {monthBalance > 0 ? "Update Budget" : "Confirm Budget"}
                 </button>
               </motion.div>
             </motion.div>
@@ -1919,7 +2157,7 @@ export default function ApsaraSpendPage() {
                   </div>
 
                   {/* Q4 — Palette switcher */}
-                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
                     <span style={{ fontSize: 13, fontWeight: 600, color: "var(--color-text-mid)", fontFamily: "var(--font-body)" }}>Accent</span>
                     <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
                       {([
@@ -1942,6 +2180,32 @@ export default function ApsaraSpendPage() {
                       ))}
                     </div>
                   </div>
+
+                  {/* C4 — Budget Mode toggle */}
+                  <div>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+                      <span style={{ fontSize: 13, fontWeight: 600, color: "var(--color-text-mid)", fontFamily: "var(--font-body)" }}>Budget Mode</span>
+                      <div style={{ display: "flex", background: "var(--color-bg-nav)", borderRadius: 10, padding: 3, gap: 3 }}>
+                        {(["soft", "hard"] as const).map((m) => (
+                          <button key={m} onClick={() => setConstraintMode(m)}
+                            style={{
+                              padding: "6px 14px", borderRadius: 7, border: "none", cursor: "pointer",
+                              background: constraintMode === m ? "var(--accent)" : "transparent",
+                              color: constraintMode === m ? "var(--accent-text)" : "var(--color-text-lo)",
+                              fontSize: 11, fontWeight: 600, fontFamily: "var(--font-body)",
+                              textTransform: "capitalize", transition: "all 0.15s",
+                            }}>
+                            {m}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                    <div style={{ fontSize: 11, color: "var(--color-text-lo)", fontFamily: "var(--font-body)", lineHeight: 1.5 }}>
+                      {constraintMode === "soft"
+                        ? "⚡ Soft — allows over-budget entries with a warning."
+                        : "🔒 Hard — requires confirmation before exceeding your budget."}
+                    </div>
+                  </div>
                 </div>
 
                 {/* Static rate info */}
@@ -1952,6 +2216,45 @@ export default function ApsaraSpendPage() {
                   </div>
                   <span style={{ fontSize: 11, background: "var(--color-border-mid)", color: "var(--color-text-lo)", padding: "4px 10px", borderRadius: 99, letterSpacing: "0.06em", fontFamily: "var(--font-body)", fontWeight: 600 }}>Fixed</span>
                 </div>
+
+                {/* E1 — Notifications */}
+                {notifPermission !== "unsupported" && (
+                  <>
+                    <div style={{ fontSize: 11, color: "var(--color-text-lo)", letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: 8, fontFamily: "var(--font-body)", fontWeight: 600 }}>Notifications</div>
+                    <div style={{ background: "var(--color-bg-page)", borderRadius: 14, padding: 16, marginBottom: 16 }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+                        <div>
+                          <div style={{ fontSize: 13, fontWeight: 600, color: "var(--color-text-mid)", fontFamily: "var(--font-body)", marginBottom: 2 }}>Budget Alerts</div>
+                          <div style={{ fontSize: 11, color: "var(--color-text-lo)", fontFamily: "var(--font-body)" }}>
+                            {notifPermission === "granted"  && "✓ Alerts at 80% and 95% of budget"}
+                            {notifPermission === "denied"   && "Blocked — enable in browser settings"}
+                            {notifPermission === "default"  && "Get notified when nearing your limit"}
+                          </div>
+                        </div>
+                        {notifPermission === "default" && (
+                          <button onClick={requestNotifPermission}
+                            style={{
+                              background: "var(--accent-muted)", border: "1px solid var(--accent-border)",
+                              color: "var(--accent)", borderRadius: 8, padding: "6px 12px",
+                              fontSize: 11, fontWeight: 600, fontFamily: "var(--font-body)", cursor: "pointer", whiteSpace: "nowrap",
+                            }}>
+                            Enable
+                          </button>
+                        )}
+                        {notifPermission === "granted" && (
+                          <span style={{ fontSize: 11, background: "#34d39920", color: "#34d399", border: "1px solid #34d39940", padding: "4px 10px", borderRadius: 99, fontFamily: "var(--font-body)", fontWeight: 600 }}>
+                            Active
+                          </span>
+                        )}
+                        {notifPermission === "denied" && (
+                          <span style={{ fontSize: 11, background: "#ef444418", color: "#ef4444", border: "1px solid #ef444440", padding: "4px 10px", borderRadius: 99, fontFamily: "var(--font-body)", fontWeight: 600 }}>
+                            Blocked
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  </>
+                )}
 
                 {/* Data Management */}
                 <div style={{ fontSize: 11, color: "var(--color-text-lo)", letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: 8, fontFamily: "var(--font-body)", fontWeight: 600 }}>Data Management</div>
