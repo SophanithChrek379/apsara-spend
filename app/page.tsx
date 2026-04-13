@@ -5,7 +5,7 @@ import { motion, AnimatePresence, PanInfo } from "framer-motion";
 import {
   Settings, ChevronLeft, ChevronRight, ChevronDown, X, Trash2, Plus,
   UtensilsCrossed, Bike, Zap, Users, ShoppingBag, MoreHorizontal,
-  CalendarDays,
+  CalendarDays, Lightbulb, Lock, Check, AlertTriangle, Circle, Pencil,
   type LucideIcon,
 } from "lucide-react";
 
@@ -301,9 +301,7 @@ function BudgetBar({ total, monthBudget, onSetBudget, onEditBudget }: {
           <button onClick={onEditBudget}
             style={{ background: "none", border: "none", cursor: "pointer", display: "flex", alignItems: "center", gap: 4, padding: "2px 4px", borderRadius: 6 }}>
             <span style={{ fontSize: 11, color: "var(--color-text-lo)", fontFamily: "var(--font-body)" }}>${monthBudget.toFixed(0)}</span>
-            <svg width="10" height="10" viewBox="0 0 10 10" fill="none">
-              <path d="M7 1.5l1.5 1.5L3 8.5H1.5V7L7 1.5z" stroke="var(--color-text-lo)" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round"/>
-            </svg>
+            <Pencil size={10} color="var(--color-text-lo)" strokeWidth={1.8} style={{ opacity: 0.6 }} />
           </button>
         )}
       </div>
@@ -704,7 +702,7 @@ function EntryModal({ tx, selectedMonth, monthBalance, totalUSD: currentTotal, c
               display: "flex", alignItems: "flex-start", gap: 10,
             }}
           >
-            <span style={{ fontSize: 14, flexShrink: 0, lineHeight: 1.2 }}>⚠️</span>
+            <AlertTriangle size={14} color="var(--accent)" strokeWidth={2} style={{ flexShrink: 0, marginTop: 1 }} />
             <span style={{ fontSize: 12, color: "#fcd34d", fontFamily: "var(--font-body)", lineHeight: 1.5 }}>
               This entry exceeds your{" "}
               <span style={{ fontWeight: 700 }}>${monthBalance.toFixed(0)}</span> budget by{" "}
@@ -878,9 +876,7 @@ function EntryModal({ tx, selectedMonth, monthBalance, totalUSD: currentTotal, c
               onClick={(e) => e.stopPropagation()}
             >
               <div style={{ width: 48, height: 48, borderRadius: "50%", background: "#ef444418", border: "1px solid #ef444440", display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 16px" }}>
-                <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
-                  <path d="M12 9v4m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" stroke="#ef4444" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
-                </svg>
+                <AlertTriangle size={22} color="#ef4444" strokeWidth={2} />
               </div>
               <div style={{ textAlign: "center", marginBottom: 8 }}>
                 <div style={{ fontSize: 18, fontWeight: 700, color: "var(--color-text-hi)", fontFamily: "var(--font-headline)", marginBottom: 8 }}>Over Budget</div>
@@ -912,6 +908,9 @@ function EntryModal({ tx, selectedMonth, monthBalance, totalUSD: currentTotal, c
 
 export default function ApsaraSpendPage() {
   const [isLoaded,         setIsLoaded]         = useState(false);
+  // K3 — Splash is shown until isLoaded fires + 400ms grace period.
+  // Covers localStorage hydration so user never sees an empty/default-state flash.
+  const [showSplash,       setShowSplash]       = useState(true);
   const [data,             setData]             = useState<AppData>(defaultData);
   const [storageCorrupted, setStorageCorrupted] = useState(false);
   const [selectedMonth,    setSelectedMonth]    = useState(todayMonthKey());
@@ -926,6 +925,10 @@ export default function ApsaraSpendPage() {
   // L1 — category filter for the Entries list; resets whenever the month changes
   const [filterCategory,   setFilterCategory]   = useState<CategoryId | "all">("all");
   const [showFilterMenu,   setShowFilterMenu]   = useState(false);
+  // L — Swipe-to-delete: openSwipeId tracks which row is snapped open.
+  // confirmDeleteTx holds the transaction pending confirmation.
+  const [openSwipeId,      setOpenSwipeId]      = useState<string | null>(null);
+  const [confirmDeleteTx,  setConfirmDeleteTx]  = useState<Transaction | null>(null);
   // O2 — monthly budget flow state
   const [showBudgetModal,  setShowBudgetModal]  = useState(false);
   const [budgetInput,      setBudgetInput]      = useState("");
@@ -962,6 +965,14 @@ export default function ApsaraSpendPage() {
   useEffect(() => {
     if (storageCorrupted) showToast("Previous data could not be loaded — storage was corrupted.", "warn");
   }, [storageCorrupted, showToast]);
+
+  // K2 — Auto-dismiss splash: 400ms after data is loaded for a smooth handoff.
+  // The 400ms gives the entrance animation time to complete before fade-out begins.
+  useEffect(() => {
+    if (!isLoaded) return;
+    const t = setTimeout(() => setShowSplash(false), 400);
+    return () => clearTimeout(t);
+  }, [isLoaded]);
 
   // D1 — Debounced localStorage write: state updates are instant (React),
   // but disk writes are batched every 300ms to prevent write-storm on rapid
@@ -1190,8 +1201,10 @@ export default function ApsaraSpendPage() {
   const handleDelete = (id: string) => {
     setShowModal(false);
     setEditTx(null);
+    setConfirmDeleteTx(null);
+    setOpenSwipeId(null);
     setData((d) => ({ ...d, transactions: d.transactions.filter((t) => t.id !== id) }));
-    showToast("Expense deleted.", "warn");
+    showToast("Expense removed.", "warn");
   };
 
   const handleResetMonth = () => {
@@ -1512,37 +1525,79 @@ export default function ApsaraSpendPage() {
           .map((tx, i) => {
             const cat     = CATEGORIES.find((c) => c.id === tx.category) ?? CATEGORIES[5];
             const dateStr = formatDisplayDate(localDateString(new Date(tx.date)));
+            const isLast  = i === filteredTxs.length - 1;
+            const isOpen  = openSwipeId === tx.id;
             return (
-              <motion.button
-                key={tx.id}
-                initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: i * 0.03 }}
-                onClick={() => { setEditTx(tx); setShowModal(true); }}
-                style={{
-                  width: "100%", display: "flex", alignItems: "center", gap: 12,
-                  padding: "10px 0",
-                  borderBottom: i < filteredTxs.length - 1 ? "1px solid #0f1520" : "none",
-                  background: "none", border: "none",
-                  borderBottomWidth: i < filteredTxs.length - 1 ? 1 : 0,
-                  borderBottomStyle: "solid" as const,
-                  borderBottomColor: "var(--color-border)",
-                  cursor: "pointer", textAlign: "left",
-                }}>
-                <CategoryIcon cat={cat} active />
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontSize: 14, fontWeight: 600, color: "var(--color-text-mid)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", lineHeight: 1.5, fontFamily: "var(--font-body)" }}>
-                    {tx.note}
-                  </div>
-                  <div style={{ fontSize: 12, color: "var(--color-text-lo)", marginTop: 4, fontFamily: "var(--font-body)", lineHeight: 1.4 }}>
-                    {cat.label} · {dateStr}
-                  </div>
-                </div>
-                <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 3 }}>
-                  <span style={{ fontSize: 16, fontWeight: 700, color: "var(--color-text-hi)", fontFamily: "var(--font-mono)" }}>
-                    {fmt(tx.amountUSD)}
-                  </span>
-                  <span style={{ fontSize: 11, color: "var(--color-text-lo)", letterSpacing: "0.06em", fontFamily: "var(--font-body)" }}>EDIT ›</span>
-                </div>
-              </motion.button>
+              // L — SwipeableRow: outer clips the reveal, inner is the draggable row
+              <div key={tx.id} style={{ position: "relative", overflow: "hidden",
+                borderBottom: isLast ? "none" : "1px solid var(--color-border)" }}>
+
+                {/* Delete reveal zone — tapping opens confirmation sheet */}
+                <button
+                  onClick={() => { setConfirmDeleteTx(tx); setOpenSwipeId(null); }}
+                  style={{
+                    position: "absolute", right: 0, top: 0, bottom: 0, width: 80,
+                    background: "#ef4444", border: "none", cursor: "pointer",
+                    display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 4,
+                  }}>
+                  <Trash2 size={18} color="#fff" strokeWidth={2} />
+                  <span style={{ fontSize: 10, fontWeight: 600, color: "#fff", fontFamily: "var(--font-body)", letterSpacing: "0.04em" }}>DELETE</span>
+                </button>
+
+                {/* Draggable row — animates to x:-80 when open, x:0 when closed */}
+                <motion.div
+                  drag="x"
+                  dragDirectionLock
+                  dragConstraints={{ left: -80, right: 0 }}
+                  dragElastic={{ left: 0.08, right: 0 }}
+                  animate={{ x: isOpen ? -80 : 0 }}
+                  transition={{ type: "spring", damping: 30, stiffness: 300 }}
+                  onDragEnd={(_e, info) => {
+                    // Snap open if dragged past 48px, snap closed otherwise
+                    if (info.offset.x < -48) {
+                      setOpenSwipeId(tx.id);
+                    } else {
+                      setOpenSwipeId(null);
+                    }
+                  }}
+                  style={{ background: "var(--color-bg-card)", position: "relative", zIndex: 1, touchAction: "pan-y" }}
+                >
+                  <motion.button
+                    initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: i * 0.03 }}
+                    onClick={() => {
+                      if (isOpen) {
+                        // Tap row content to close snap back
+                        setOpenSwipeId(null);
+                        return;
+                      }
+                      setEditTx(tx); setShowModal(true);
+                    }}
+                    style={{
+                      width: "100%", display: "flex", alignItems: "center", gap: 12,
+                      padding: "12px 0",
+                      background: "none", border: "none",
+                      cursor: "pointer", textAlign: "left",
+                    }}>
+                    <CategoryIcon cat={cat} active />
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontSize: 14, fontWeight: 600, color: "var(--color-text-mid)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", lineHeight: 1.5, fontFamily: "var(--font-body)" }}>
+                        {tx.note}
+                      </div>
+                      <div style={{ fontSize: 12, color: "var(--color-text-lo)", marginTop: 4, fontFamily: "var(--font-body)", lineHeight: 1.4 }}>
+                        {cat.label} · {dateStr}
+                      </div>
+                    </div>
+                    <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 3 }}>
+                      <span style={{ fontSize: 16, fontWeight: 700, color: "var(--color-text-hi)", fontFamily: "var(--font-mono)" }}>
+                        {fmt(tx.amountUSD)}
+                      </span>
+                      <span style={{ display: "flex", alignItems: "center", gap: 2, color: isOpen ? "var(--accent)" : "var(--color-text-lo)", letterSpacing: "0.06em", fontFamily: "var(--font-body)", fontSize: 11, transition: "color 0.2s" }}>
+                        {isOpen ? <>TAP EDIT TO CLOSE</> : <>EDIT <ChevronRight size={11} strokeWidth={2.5} /></>}
+                      </span>
+                    </div>
+                  </motion.button>
+                </motion.div>
+              </div>
             );
           })
       )}
@@ -1765,19 +1820,42 @@ export default function ApsaraSpendPage() {
         /* ── Layout Shifter — Grid-8 aligned ────────────────────────────── */
         /* Mobile-first: single-column stack, max 430px                      */
         .main-wrap    { max-width: 430px; margin: 0 auto; }
-        /* safe-area-inset-top clears Dynamic Island on iPhone               */
-        .header-pad   { padding: max(var(--sp-14), calc(var(--sp-12) + env(safe-area-inset-top))) var(--sp-6) 0; }
-        .monthnav-pad { padding: var(--sp-4) var(--sp-6) 0; }
 
-        /* Tablet / Desktop: 2-column grid, max 900px                        */
+        /* ── H1/H2  Sticky header ─────────────────────────────────────────── */
+        /* Wraps header-pad + monthnav-pad. Sticks to top while content scrolls. */
+        /* backdrop-filter blurs the page content scrolling underneath.          */
+        .sticky-header {
+          position: sticky;
+          top: 0;
+          z-index: 30;
+          backdrop-filter: blur(16px) saturate(1.4);
+          -webkit-backdrop-filter: blur(16px) saturate(1.4);
+          background: color-mix(in srgb, var(--color-bg-page) 85%, transparent);
+          border-bottom: 0.5px solid color-mix(in srgb, var(--color-border) 60%, transparent);
+        }
+
+        /* H2 — safe-area-inset-top lives in the sticky header, not header-pad */
+        /* header-pad top padding only needs to clear the internal card spacing */
+        .header-pad   { padding: max(var(--sp-6), env(safe-area-inset-top)) var(--sp-6) var(--sp-2); }
+        .monthnav-pad { padding: var(--sp-3) var(--sp-6) var(--sp-4); }
+
+        /* Tablet / Desktop */
         @media (min-width: 768px) {
           .main-wrap    { max-width: 900px; }
-          .header-pad   { padding: max(var(--sp-14), calc(var(--sp-12) + env(safe-area-inset-top))) var(--sp-8) 0; }
-          .monthnav-pad { padding: var(--sp-4) var(--sp-8) 0; }
+          .header-pad   { padding: max(var(--sp-6), env(safe-area-inset-top)) var(--sp-8) var(--sp-2); }
+          .monthnav-pad { padding: var(--sp-3) var(--sp-8) var(--sp-4); }
+        }
+
+        /* I3 — Main scroll content padding-bottom matches footer height      */
+        /* Mobile: ~90px clears the sticky footer bar                        */
+        /* Tablet+: reduced since FAB floats and doesn't block content        */
+        @media (min-width: 768px) {
+          .main-scroll { padding-bottom: calc(var(--sp-8) + env(safe-area-inset-bottom)) !important; }
         }
 
         /* Dashboard card grid — always single column flex stack ──────────── */
-        /* Issue 3: always 1-col, n-rows on all screen sizes                  */
+        /* H3 — padding-top compensates for sticky header so summary card     */
+        /* is not clipped on initial render. ~140px header height on mobile.  */
         .dash-pad  { padding: var(--sp-4) var(--sp-4) 0; display: flex; flex-direction: column; gap: var(--sp-4); }
         @media (min-width: 768px) {
           .dash-pad  { padding: var(--sp-4) var(--sp-8) 0; }
@@ -1785,12 +1863,42 @@ export default function ApsaraSpendPage() {
           .col-right { display: flex; flex-direction: column; }
         }
 
-        /* ── Responsive FAB ─────────────────────────────────────────────── */
-        /* safe-area-inset-bottom clears iPhone home indicator               */
-        /* §3 spec: mobile-first max-width 400px, centered with margin auto  */
-        .fab-btn { position: fixed; bottom: calc(var(--sp-8) + env(safe-area-inset-bottom)); left: var(--sp-4); right: var(--sp-4); width: auto; max-width: 400px; margin: 0 auto; transform: none; }
+        /* ── I1  FAB sticky footer — mobile-first ────────────────────────── */
+        /* Mobile: full-width footer bar with blurred background,             */
+        /* border-top hairline, and safe-area bottom padding.                 */
+        .fab-footer {
+          position: fixed;
+          bottom: 0; left: 0; right: 0;
+          z-index: 50;
+          padding: var(--sp-3) var(--sp-4) calc(var(--sp-3) + env(safe-area-inset-bottom));
+          backdrop-filter: blur(16px) saturate(1.4);
+          -webkit-backdrop-filter: blur(16px) saturate(1.4);
+          background: color-mix(in srgb, var(--color-bg-page) 88%, transparent);
+          border-top: 0.5px solid color-mix(in srgb, var(--color-border) 50%, transparent);
+        }
+        /* The button inside fills the footer bar on mobile */
+        .fab-btn {
+          width: 100%;
+          max-width: 400px;
+          margin: 0 auto;
+          display: flex;
+        }
+        /* I2 — Tablet+: revert to right-anchored floating pill, no footer bar */
         @media (min-width: 768px) {
-          .fab-btn { left: auto; right: var(--sp-8); max-width: 220px; margin: 0; }
+          .fab-footer {
+            bottom: calc(var(--sp-8) + env(safe-area-inset-bottom));
+            left: auto; right: var(--sp-8);
+            padding: 0;
+            background: transparent;
+            backdrop-filter: none;
+            -webkit-backdrop-filter: none;
+            border-top: none;
+          }
+          .fab-btn {
+            width: auto;
+            max-width: 220px;
+            margin: 0;
+          }
         }
 
         /* ── Date picker — full-width mobile, auto-width on tablet+ ─────── */
@@ -1815,13 +1923,102 @@ export default function ApsaraSpendPage() {
           0%   { background-position: -200% 0; }
           100% { background-position:  200% 0; }
         }
+        /* J1 — SkeletonCard: uses CSS vars so it adapts to light/dark theme */
         .skeleton {
-          background: linear-gradient(90deg, #141920 25%, #1e2a38 50%, #141920 75%);
+          background: linear-gradient(90deg,
+            var(--color-bg-nav) 25%,
+            var(--color-border-mid) 50%,
+            var(--color-bg-nav) 75%
+          );
           background-size: 200% 100%;
-          animation: shimmer 1.4s infinite;
-          border-radius: 22px;
+          animation: shimmer 1.4s ease-in-out infinite;
+          border-radius: 12px;
         }
+        .skeleton-round  { border-radius: 99px; }  /* for pill/badge shapes  */
+        .skeleton-circle { border-radius: 50%;  }  /* for icon/avatar shapes */
       `}</style>
+
+      {/* ════ K1  SPLASH SCREEN — covers localStorage hydration ════ */}
+      {/* AnimatePresence keeps the exit animation alive after showSplash flips false */}
+      <AnimatePresence>
+        {showSplash && (
+          <motion.div
+            key="splash"
+            initial={{ opacity: 1 }}
+            exit={{ opacity: 0, scale: 1.04 }}
+            transition={{ duration: 0.45, ease: [0.4, 0, 0.2, 1] }}
+            style={{
+              position: "fixed", inset: 0, zIndex: 999,
+              background: "var(--color-bg-page)",
+              display: "flex", flexDirection: "column",
+              alignItems: "center", justifyContent: "center",
+              gap: 0,
+            }}
+          >
+            {/* Logo mark — scaled-up wallet SVG */}
+            <motion.div
+              initial={{ opacity: 0, y: 20, scale: 0.9 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              transition={{ duration: 0.5, ease: [0.4, 0, 0.2, 1] }}
+              style={{ marginBottom: 28 }}
+            >
+              <svg width="96" height="96" viewBox="0 0 96 96" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                {/* Outer card body */}
+                <rect x="8" y="28" width="80" height="52" rx="12" fill="var(--color-border-mid)" />
+                {/* Card top strip */}
+                <path d="M8 40 Q8 28 20 28 H76 Q88 28 88 40 V52 H8 Z" fill="var(--color-bg-nav)" />
+                {/* Horizontal divider */}
+                <line x1="8" y1="52" x2="88" y2="52" stroke="var(--color-border)" strokeWidth="1.5" />
+                {/* Card slot */}
+                <rect x="16" y="60" width="36" height="12" rx="4" fill="var(--color-bg-deep)" stroke="var(--color-border)" strokeWidth="1.5" />
+                {/* Chip lines */}
+                <rect x="20" y="64" width="10" height="1.5" rx="1" fill="var(--color-border-mid)" />
+                <rect x="20" y="67" width="7" height="1.5" rx="1" fill="var(--color-border-mid)" />
+                {/* Accent coin */}
+                <circle cx="72" cy="26" r="18" fill="var(--accent-muted)" stroke="var(--accent)" strokeWidth="2" />
+                {/* Dollar sign */}
+                <text x="72" y="32" textAnchor="middle" fill="var(--accent)" fontSize="18" fontWeight="800" fontFamily="system-ui">$</text>
+                {/* Sparkle dots */}
+                <circle cx="18" cy="18" r="2.5" fill="var(--accent-border)" />
+                <circle cx="10" cy="26" r="1.5" fill="var(--accent-border)" />
+                <circle cx="24" cy="10" r="1.5" fill="var(--accent-border)" />
+              </svg>
+            </motion.div>
+
+            {/* Wordmark */}
+            <motion.div
+              initial={{ opacity: 0, y: 12 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.45, delay: 0.12, ease: [0.4, 0, 0.2, 1] }}
+              style={{ textAlign: "center" }}
+            >
+              <div style={{ fontSize: 32, fontWeight: 800, letterSpacing: "-0.03em", color: "var(--color-text-hi)", fontFamily: "var(--font-headline)", lineHeight: 1.1, marginBottom: 8 }}>
+                Apsara <span style={{ color: "var(--accent)" }}>Spend</span>
+              </div>
+              <div style={{ fontSize: 13, color: "var(--color-text-lo)", fontFamily: "var(--font-body)", letterSpacing: "0.04em" }}>
+                Your personal budget tracker
+              </div>
+            </motion.div>
+
+            {/* Loading indicator */}
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              transition={{ delay: 0.3, duration: 0.3 }}
+              style={{ position: "absolute", bottom: "10%", display: "flex", alignItems: "center", gap: 6 }}
+            >
+              {[0, 1, 2].map((i) => (
+                <motion.div
+                  key={i}
+                  animate={{ opacity: [0.3, 1, 0.3] }}
+                  transition={{ duration: 1, delay: i * 0.18, repeat: Infinity, ease: "easeInOut" }}
+                  style={{ width: 6, height: 6, borderRadius: "50%", background: "var(--accent)" }}
+                />
+              ))}
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       <main className="main-wrap"
         style={{
@@ -1840,10 +2037,21 @@ export default function ApsaraSpendPage() {
           background: "radial-gradient(circle, var(--accent-muted) 0%, transparent 68%)",
         }} />
 
-        <div style={{ position: "relative", zIndex: 1, paddingBottom: "calc(var(--sp-10) * 3 + env(safe-area-inset-bottom))" }}>
+        <div className="main-scroll" style={{ position: "relative", zIndex: 1, paddingBottom: "calc(90px + env(safe-area-inset-bottom))" }}>
+
+          {/* ════ STICKY HEADER — app title + month navigation ════ */}
+          <div className="sticky-header">
 
           {/* ════ HEADER ════ */}
           <div className="header-pad" style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+            {/* J2 — Header skeleton while hydrating */}
+            {!isLoaded ? (
+              <div style={{ display: "flex", flexDirection: "column", gap: 8, paddingTop: 4 }}>
+                <div className="skeleton skeleton-round" style={{ width: 100, height: 10 }} />
+                <div className="skeleton skeleton-round" style={{ width: 180, height: 28 }} />
+                <div className="skeleton skeleton-round" style={{ width: 140, height: 10 }} />
+              </div>
+            ) : (
             <div>
               <div style={{ fontSize: 11, letterSpacing: "0.20em", color: "var(--color-text-lo)", textTransform: "uppercase", marginBottom: 8, fontFamily: "var(--font-body)", fontWeight: 600 }}>
                 Personal Tracker
@@ -1857,9 +2065,7 @@ export default function ApsaraSpendPage() {
                   <button onClick={() => { setBudgetInput(String(monthBalance)); setShowBudgetModal(true); }}
                     style={{ background: "var(--accent-muted)", border: "1px solid var(--accent-border)", color: "var(--accent)", borderRadius: 99, padding: "1px 8px", fontSize: 10, fontWeight: 600, letterSpacing: "0.06em", cursor: "pointer", fontFamily: "var(--font-body)", display: "flex", alignItems: "center", gap: 4 }}>
                     ${(data.monthlyBalances[selectedMonth]).toFixed(0)} budget
-                    <svg width="8" height="8" viewBox="0 0 10 10" fill="none">
-                      <path d="M7 1.5l1.5 1.5L3 8.5H1.5V7L7 1.5z" stroke="var(--accent)" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"/>
-                    </svg>
+                    <Pencil size={8} color="var(--accent)" strokeWidth={2} />
                   </button>
                 ) : (
                   <button onClick={() => setShowBudgetModal(true)}
@@ -1869,6 +2075,8 @@ export default function ApsaraSpendPage() {
                 )}
               </div>
             </div>
+            )}
+            {/* Settings button always visible */}
             <button aria-label="Open settings" onClick={() => setShowSettings(true)}
               style={{ background: "var(--color-bg-nav)", border: "1px solid var(--color-border-mid)", borderRadius: 12, padding: 12, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", minWidth: 44, minHeight: 44, marginTop: 4 }}>
               <Settings className="icon-nav" color="var(--color-text-lo)" strokeWidth={1.8} />
@@ -1876,6 +2084,17 @@ export default function ApsaraSpendPage() {
           </div>
 
           {/* ════ MONTH NAV ════ */}
+          {/* J3 — Month nav skeleton while hydrating */}
+          {!isLoaded ? (
+            <div className="monthnav-pad" style={{ display: "flex", alignItems: "center", gap: 12 }}>
+              <div className="skeleton" style={{ width: 44, height: 44, borderRadius: 10, flexShrink: 0 }} />
+              <div style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", gap: 8 }}>
+                <div className="skeleton skeleton-round" style={{ width: 100, height: 22 }} />
+                <div className="skeleton skeleton-round" style={{ width: 60, height: 12 }} />
+              </div>
+              <div className="skeleton" style={{ width: 44, height: 44, borderRadius: 10, flexShrink: 0 }} />
+            </div>
+          ) : (
           <div className="monthnav-pad" style={{ display: "flex", alignItems: "center", gap: 12 }}>
             <button aria-label="Previous month" onClick={() => navigateMonth(-1)}
               style={{ background: "var(--color-bg-nav)", border: "1px solid var(--color-border-mid)", borderRadius: 10, padding: 12, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", minWidth: 44, minHeight: 44 }}>
@@ -1893,7 +2112,7 @@ export default function ApsaraSpendPage() {
                     {MONTH_FULL[month - 1]}
                   </div>
                   <div style={{ fontSize: 13, color: "var(--color-text-lo)", marginTop: 4, fontWeight: 500, fontFamily: "var(--font-body)" }}>
-                    {year}{isCurrentMonth && <span style={{ color: "var(--accent)", fontSize: 11, letterSpacing: "0.08em", marginLeft: 6, fontFamily: "var(--font-body)", fontWeight: 600 }}>● NOW</span>}
+                    {year}{isCurrentMonth && <span style={{ color: "var(--accent)", fontSize: 11, letterSpacing: "0.08em", marginLeft: 6, fontFamily: "var(--font-body)", fontWeight: 600, display: "inline-flex", alignItems: "center", gap: 3 }}><Circle size={6} fill="var(--accent)" color="var(--accent)" /> NOW</span>}
                   </div>
                 </motion.div>
               </AnimatePresence>
@@ -1913,6 +2132,9 @@ export default function ApsaraSpendPage() {
               <ChevronRight className="icon-nav" color="var(--color-text-lo)" strokeWidth={2} />
             </button>
           </div>
+          )}{/* end isLoaded month nav */}
+
+          </div>{/* end .sticky-header */}
 
           {/* ════ SWIPEABLE DASHBOARD ════ */}
           <motion.div drag="x" dragConstraints={{ left: 0, right: 0 }} dragElastic={0.12}
@@ -1924,11 +2146,66 @@ export default function ApsaraSpendPage() {
                 initial="enter" animate="center" exit="exit"
                 transition={{ duration: 0.26, ease: [0.4, 0, 0.2, 1] }}>
 
-                {/* § H-03  Skeleton while hydrating */}
+                {/* J4+J5 — Shaped skeletons matching real card geometry */}
                 {!isLoaded ? (
                   <div className="dash-pad">
-                    <div className="skeleton" style={{ height: 130 }} />
-                    <div className="skeleton" style={{ height: 100 }} />
+                    {/* J4 — SummaryBreakdownCard skeleton */}
+                    <div style={{ background: "var(--color-bg-card)", borderRadius: 22, border: "1px solid var(--color-border)", padding: "28px 28px 22px", display: "flex", flexDirection: "column", gap: 16 }}>
+                      {/* Total amount block */}
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end" }}>
+                        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                          <div className="skeleton skeleton-round" style={{ width: 80, height: 10 }} />
+                          <div className="skeleton skeleton-round" style={{ width: 140, height: 40 }} />
+                          <div className="skeleton skeleton-round" style={{ width: 80, height: 10 }} />
+                        </div>
+                        <div className="skeleton" style={{ width: 90, height: 36, borderRadius: 10 }} />
+                      </div>
+                      {/* Progress bar */}
+                      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                        <div style={{ display: "flex", justifyContent: "space-between" }}>
+                          <div className="skeleton skeleton-round" style={{ width: 50, height: 10 }} />
+                          <div className="skeleton skeleton-round" style={{ width: 70, height: 10 }} />
+                        </div>
+                        <div className="skeleton" style={{ height: 7, borderRadius: 999 }} />
+                        <div style={{ display: "flex", justifyContent: "space-between" }}>
+                          <div className="skeleton skeleton-round" style={{ width: 20, height: 10 }} />
+                          <div className="skeleton skeleton-round" style={{ width: 30, height: 10 }} />
+                        </div>
+                      </div>
+                      {/* Breakdown rows */}
+                      <div style={{ height: 1, background: "var(--color-border)" }} />
+                      {[0,1,2].map(i => (
+                        <div key={i} style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                          <div className="skeleton skeleton-circle" style={{ width: 36, height: 36, flexShrink: 0 }} />
+                          <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 6 }}>
+                            <div className="skeleton skeleton-round" style={{ width: `${[60,75,50][i]}%`, height: 12 }} />
+                            <div className="skeleton" style={{ height: 4, borderRadius: 999 }} />
+                          </div>
+                          <div className="skeleton skeleton-round" style={{ width: 50, height: 12 }} />
+                        </div>
+                      ))}
+                    </div>
+
+                    {/* J5 — TransactionList skeleton */}
+                    <div style={{ background: "var(--color-bg-card)", borderRadius: 22, border: "1px solid var(--color-border)", padding: "28px 28px" }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 20 }}>
+                        <div className="skeleton skeleton-round" style={{ width: 70, height: 11 }} />
+                        <div className="skeleton skeleton-round" style={{ width: 50, height: 24, borderRadius: 8 }} />
+                      </div>
+                      {[0,1,2].map(i => (
+                        <div key={i} style={{ display: "flex", alignItems: "center", gap: 12, paddingBottom: i < 2 ? 16 : 0, marginBottom: i < 2 ? 16 : 0, borderBottom: i < 2 ? "1px solid var(--color-border)" : "none" }}>
+                          <div className="skeleton skeleton-circle" style={{ width: 40, height: 40, flexShrink: 0 }} />
+                          <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 6 }}>
+                            <div className="skeleton skeleton-round" style={{ width: `${[70,55,80][i]}%`, height: 13 }} />
+                            <div className="skeleton skeleton-round" style={{ width: "40%", height: 10 }} />
+                          </div>
+                          <div style={{ display: "flex", flexDirection: "column", gap: 5, alignItems: "flex-end" }}>
+                            <div className="skeleton skeleton-round" style={{ width: 55, height: 13 }} />
+                            <div className="skeleton skeleton-round" style={{ width: 30, height: 10 }} />
+                          </div>
+                        </div>
+                      ))}
+                    </div>
                   </div>
                 ) : !hasMonthBudget ? (
                   // S3 — No budget set: show the Initialize Screen gate
@@ -1958,8 +2235,9 @@ export default function ApsaraSpendPage() {
           </div>
         </div>
 
-        {/* ════ FAB — only shown after budget is set (S4) ════ */}
+        {/* ════ FAB sticky footer — only shown after budget is set ════ */}
         {hasMonthBudget && (
+        <div className="fab-footer">
         <motion.button
           whileTap={{ scale: fabDisabled ? 1 : 0.97 }}
           aria-label={fabDisabled ? "Monthly budget reached" : "Add new expense"}
@@ -1974,11 +2252,11 @@ export default function ApsaraSpendPage() {
           className="fab-btn"
           style={{
             background: fabDisabled
-              ? "#1e2a38"
+              ? "var(--color-border-mid)"
               : "linear-gradient(135deg, var(--accent) 0%, var(--accent-dim) 100%)",
-            color: fabDisabled ? "var(--color-text-lo)" : "#0d0f14",
-            border: fabDisabled ? "1px solid #2d3748" : "none",
-            borderRadius: 20,
+            color: fabDisabled ? "var(--color-text-lo)" : "var(--accent-text)",
+            border: "none",
+            borderRadius: 16,
             padding: "16px 28px",
             cursor: fabDisabled ? "not-allowed" : "pointer",
             zIndex: 50,
@@ -1989,16 +2267,77 @@ export default function ApsaraSpendPage() {
             animation: fabDisabled ? "none" : "pulseGlow 3s ease-in-out infinite",
             minHeight: 54,
             opacity: fabDisabled ? 0.6 : 1,
-            boxShadow: fabDisabled ? "none" : "0 20px 50px rgba(0,0,0,0.5)",
+            boxShadow: fabDisabled ? "none" : "0 8px 24px rgba(0,0,0,0.35)",
             transition: "background 0.3s, color 0.3s, opacity 0.3s",
           }}>
-          <Plus size={18} color={fabDisabled ? "var(--color-text-lo)" : "#0d0f14"} strokeWidth={3} />
+          <Plus size={18} color={fabDisabled ? "var(--color-text-lo)" : "var(--accent-text)"} strokeWidth={3} />
           {fabDisabled ? "Budget Reached" : "Add Expense"}
         </motion.button>
+        </div>
         )}{/* end hasMonthBudget FAB gate */}
 
         {/* ════ MODALS ════ */}
         <AnimatePresence>
+
+          {/* ── Swipe-delete confirmation sheet ── */}
+          {confirmDeleteTx && (
+            <motion.div
+              initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+              style={{ position: "fixed", inset: 0, background: "rgba(5,7,12,0.88)", zIndex: 260, display: "flex", alignItems: "flex-end" }}
+              onClick={() => { setConfirmDeleteTx(null); setOpenSwipeId(null); }}>
+              <motion.div
+                initial={{ y: "100%" }} animate={{ y: 0 }} exit={{ y: "100%" }}
+                transition={{ type: "spring", damping: 30, stiffness: 320 }}
+                role="alertdialog" aria-modal="true" aria-label="Confirm delete expense"
+                style={{ background: "var(--color-bg-card)", borderRadius: "22px 22px 0 0", padding: "24px 24px 40px", width: "100%", maxWidth: 480, margin: "0 auto", border: "1px solid var(--color-border-mid)", borderBottom: "none" }}
+                onClick={(e) => e.stopPropagation()}>
+
+                {/* Drag handle */}
+                <div style={{ width: 36, height: 4, background: "var(--color-border-mid)", borderRadius: 2, margin: "0 auto 20px" }} />
+
+                {/* Icon */}
+                <div style={{ width: 48, height: 48, borderRadius: "50%", background: "#ef444418", border: "1px solid #ef444430", display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 16px" }}>
+                  <Trash2 size={20} color="#ef4444" strokeWidth={2} />
+                </div>
+
+                {/* Heading */}
+                <div style={{ textAlign: "center", marginBottom: 20 }}>
+                  <div style={{ fontSize: 17, fontWeight: 700, color: "var(--color-text-hi)", fontFamily: "var(--font-headline)", marginBottom: 8 }}>
+                    Remove this expense?
+                  </div>
+                  {/* Transaction preview */}
+                  <div style={{ background: "var(--color-bg-page)", borderRadius: 12, padding: "10px 16px", display: "inline-flex", alignItems: "center", gap: 10 }}>
+                    <div style={{ textAlign: "left" }}>
+                      <div style={{ fontSize: 13, fontWeight: 600, color: "var(--color-text-mid)", fontFamily: "var(--font-body)" }}>
+                        {confirmDeleteTx.note || CATEGORIES.find(c => c.id === confirmDeleteTx.category)?.label}
+                      </div>
+                      <div style={{ fontSize: 12, color: "var(--color-text-lo)", fontFamily: "var(--font-body)", marginTop: 2 }}>
+                        {fmt(confirmDeleteTx.amountUSD)} · {formatDisplayDate(localDateString(new Date(confirmDeleteTx.date)))}
+                      </div>
+                    </div>
+                  </div>
+                  <div style={{ fontSize: 12, color: "var(--color-text-lo)", fontFamily: "var(--font-body)", marginTop: 12, lineHeight: 1.5 }}>
+                    This action cannot be undone.
+                  </div>
+                </div>
+
+                {/* Actions */}
+                <div style={{ display: "flex", gap: 10 }}>
+                  <button
+                    onClick={() => { setConfirmDeleteTx(null); setOpenSwipeId(null); }}
+                    style={{ flex: 1, padding: "14px 0", borderRadius: 14, border: "1px solid var(--color-border-mid)", background: "var(--color-bg-nav)", color: "var(--color-text-lo)", fontSize: 15, fontWeight: 600, fontFamily: "var(--font-body)", cursor: "pointer" }}>
+                    Cancel
+                  </button>
+                  <button
+                    onClick={() => handleDelete(confirmDeleteTx.id)}
+                    style={{ flex: 1, padding: "14px 0", borderRadius: 14, border: "none", background: "#ef4444", color: "#fff", fontSize: 15, fontWeight: 700, fontFamily: "var(--font-body)", cursor: "pointer" }}>
+                    Remove
+                  </button>
+                </div>
+              </motion.div>
+            </motion.div>
+          )}
+
           {showPicker && (
             <MonthPicker current={selectedMonth}
               onSelect={(k) => {
@@ -2085,7 +2424,7 @@ export default function ApsaraSpendPage() {
 
                 {/* A2 — Flexible info note replaces immutability warning */}
                 <div style={{ background: "var(--accent-muted)", border: "1px solid var(--accent-border)", borderRadius: 12, padding: "10px 14px", marginBottom: 24, display: "flex", gap: 10, alignItems: "flex-start" }}>
-                  <span style={{ fontSize: 14, flexShrink: 0, marginTop: 1 }}>💡</span>
+                  <Lightbulb size={14} color="var(--accent)" strokeWidth={1.8} style={{ flexShrink: 0, marginTop: 1 }} />
                   <span style={{ fontSize: 12, color: "var(--accent)", fontFamily: "var(--font-body)", lineHeight: 1.5 }}>
                     You can update your budget at any time — changes apply immediately.
                   </span>
@@ -2200,10 +2539,10 @@ export default function ApsaraSpendPage() {
                         ))}
                       </div>
                     </div>
-                    <div style={{ fontSize: 11, color: "var(--color-text-lo)", fontFamily: "var(--font-body)", lineHeight: 1.5 }}>
+                    <div style={{ fontSize: 11, color: "var(--color-text-lo)", fontFamily: "var(--font-body)", lineHeight: 1.5, display: "flex", alignItems: "center", gap: 5 }}>
                       {constraintMode === "soft"
-                        ? "⚡ Soft — allows over-budget entries with a warning."
-                        : "🔒 Hard — requires confirmation before exceeding your budget."}
+                        ? <><Zap size={11} color="var(--color-text-lo)" strokeWidth={2} /> Soft — allows over-budget entries with a warning.</>
+                        : <><Lock size={11} color="var(--color-text-lo)" strokeWidth={2} /> Hard — requires confirmation before exceeding your budget.</>}
                     </div>
                   </div>
                 </div>
@@ -2226,7 +2565,7 @@ export default function ApsaraSpendPage() {
                         <div>
                           <div style={{ fontSize: 13, fontWeight: 600, color: "var(--color-text-mid)", fontFamily: "var(--font-body)", marginBottom: 2 }}>Budget Alerts</div>
                           <div style={{ fontSize: 11, color: "var(--color-text-lo)", fontFamily: "var(--font-body)" }}>
-                            {notifPermission === "granted"  && "✓ Alerts at 80% and 95% of budget"}
+                            {notifPermission === "granted"  && <><Check size={11} color="#34d399" strokeWidth={2.5} style={{ display: "inline", verticalAlign: "middle", marginRight: 3 }} />Alerts at 80% and 95% of budget</>}
                             {notifPermission === "denied"   && "Blocked — enable in browser settings"}
                             {notifPermission === "default"  && "Get notified when nearing your limit"}
                           </div>
