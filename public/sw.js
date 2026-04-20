@@ -2,7 +2,7 @@
 // Strategy: cache-first for app shell, network-first for navigation.
 // Keeps the budgeting tool functional with no connectivity.
 
-const CACHE_NAME = "apsara-spend-v1";
+const CACHE_NAME = "apsara-spend-v2";
 
 // App shell: pages and static assets to precache on install
 const PRECACHE_URLS = [
