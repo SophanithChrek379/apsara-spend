@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback, useRef, useMemo } from "react";
+import React, { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { motion, AnimatePresence, PanInfo } from "framer-motion";
 import {
   Settings, ChevronLeft, ChevronRight, ChevronDown, X, Trash2, Plus,
@@ -279,7 +279,14 @@ function BudgetBar({ total, monthBudget, onSetBudget, onEditBudget }: {
           </span>
         </div>
       </div>
-      <div style={{ background: "var(--color-bg-input)", borderRadius: 999, height: 7, overflow: "hidden" }}>
+      <div
+        role="progressbar"
+        aria-label="Budget progress"
+        aria-valuenow={pctDisplay}
+        aria-valuemin={0}
+        aria-valuemax={100}
+        aria-valuetext={isOver ? `Over budget by $${overAmt.toFixed(2)}` : `${pctDisplay}% used — ${tierLabel}`}
+        style={{ background: "var(--color-bg-input)", borderRadius: 999, height: 7, overflow: "hidden" }}>
         <motion.div
           animate={{ width: `${pct}%` }}
           transition={{ duration: 0.5, ease: [0.4, 0, 0.2, 1] }}
@@ -485,6 +492,7 @@ function EntryModal({ tx, selectedMonth, monthBalance, totalUSD: currentTotal, c
   const [date,          setDate]          = useState(defaultDate);
   const [deleteConfirm, setDeleteConfirm] = useState(false);
   const [shake,         setShake]         = useState(false);
+  const [showDiscard,   setShowDiscard]   = useState(false); // MO2 — discard guard
   const [amtFocused,    setAmtFocused]    = useState(false);
   const [dateFocused,   setDateFocused]   = useState(false);
   // § 2  KHR denomination hint state — shown when amount is not a multiple of KHR_STEP
@@ -605,7 +613,14 @@ function EntryModal({ tx, selectedMonth, monthBalance, totalUSD: currentTotal, c
       initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
       className="modal-backdrop"
       style={{ position: "fixed", inset: 0, background: "rgba(5,7,12,0.9)", zIndex: 200, display: "flex" }}
-      onClick={onClose}
+      onClick={() => {
+        // MO2 — if user has typed an amount or note, confirm before discarding
+        if ((rawAmount && parseFloat(rawAmount) > 0) || note.trim()) {
+          setShowDiscard(true);
+        } else {
+          onClose();
+        }
+      }}
     >
       <motion.div
         ref={modalRef}
@@ -614,7 +629,7 @@ function EntryModal({ tx, selectedMonth, monthBalance, totalUSD: currentTotal, c
         exit={modalMode   === "center" ? MODAL_EXIT_CENTER   : MODAL_EXIT_SHEET}
         transition={{ type: "spring", damping: 28, stiffness: 300 }}
         className="modal-sheet"
-        style={{ background: "var(--color-bg-card)", padding: "28px 24px 44px", width: "100%", border: "1px solid var(--color-border-mid)", maxWidth: 480, margin: "0 auto" }}
+        style={{ background: "var(--color-bg-card)", padding: "28px 24px 44px", width: "100%", border: "1px solid var(--color-border-mid)", maxWidth: 480, margin: "0 auto", position: "relative" }}
         onClick={(e) => e.stopPropagation()}
       >
         {/* Drag handle — only on mobile bottom-sheet */}
@@ -847,6 +862,18 @@ function EntryModal({ tx, selectedMonth, monthBalance, totalUSD: currentTotal, c
           })}
         </div>
 
+        {/* MO2 — Discard unsaved changes overlay */}
+        {showDiscard && (
+          <div style={{ position: "absolute", inset: 0, background: "rgba(5,7,12,0.94)", borderRadius: 20, zIndex: 10, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: 28, gap: 8 }}>
+            <div style={{ fontSize: 16, fontWeight: 700, color: "var(--color-text-hi)", fontFamily: "var(--font-headline)", textAlign: "center", marginBottom: 4 }}>Discard changes?</div>
+            <div style={{ fontSize: 13, color: "var(--color-text-lo)", fontFamily: "var(--font-body)", textAlign: "center", marginBottom: 12 }}>Your unsaved entry will be lost.</div>
+            <div style={{ display: "flex", gap: 10, width: "100%" }}>
+              <button onClick={() => setShowDiscard(false)} style={{ flex: 1, padding: "12px 0", borderRadius: 12, border: "1px solid var(--color-border-mid)", background: "var(--color-bg-nav)", color: "var(--color-text-lo)", fontSize: 15, fontWeight: 600, fontFamily: "var(--font-body)", cursor: "pointer" }}>Keep editing</button>
+              <button onClick={onClose} style={{ flex: 1, padding: "12px 0", borderRadius: 12, border: "none", background: "#ef4444", color: "#fff", fontSize: 15, fontWeight: 700, fontFamily: "var(--font-body)", cursor: "pointer" }}>Discard</button>
+            </div>
+          </div>
+        )}
+
         {/* Actions */}
         <div style={{ display: "flex", gap: 8 }}>
           {isEdit && !deleteConfirm && (
@@ -863,21 +890,29 @@ function EntryModal({ tx, selectedMonth, monthBalance, totalUSD: currentTotal, c
           )}
           {!deleteConfirm && (
             <button onClick={handleSave}
+              disabled={parsedAmt <= 0}
               style={{
                 flex: 1, padding: 14, borderRadius: 14,
-                background: wouldExceed && constraintMode === "soft"
+                background: parsedAmt <= 0
+                  ? "var(--color-border-mid)"
+                  : wouldExceed && constraintMode === "soft"
                   ? "linear-gradient(135deg, #ef4444, #dc2626)"
                   : wouldExceed && constraintMode === "hard"
                   ? "transparent"
                   : "linear-gradient(135deg, var(--accent), var(--accent-dim))",
                 border: wouldExceed && constraintMode === "hard" ? "1.5px solid #f59e0b60" : "none",
-                color: wouldExceed && constraintMode === "hard" ? "#f59e0b" : "var(--accent-text)",
+                color: parsedAmt <= 0
+                  ? "var(--color-text-lo)"
+                  : wouldExceed && constraintMode === "hard" ? "#f59e0b" : "var(--accent-text)",
                 fontWeight: 700, fontSize: 16, fontFamily: "var(--font-body)",
-                cursor: "pointer",
-                boxShadow: wouldExceed ? "none" : "0 3px 16px var(--accent-glow)",
+                cursor: parsedAmt <= 0 ? "not-allowed" : "pointer",
+                opacity: parsedAmt <= 0 ? 0.6 : 1,
+                boxShadow: parsedAmt <= 0 || wouldExceed ? "none" : "0 3px 16px var(--accent-glow)",
                 transition: "all 0.2s",
               }}>
-              {wouldExceed && constraintMode === "hard"
+              {parsedAmt <= 0
+                ? (isEdit ? "Save Changes" : "Add Expense")
+                : wouldExceed && constraintMode === "hard"
                 ? "Over budget — confirm?"
                 : isEdit ? "Save Changes" : "Add Expense"}
             </button>
@@ -943,10 +978,23 @@ export default function ApsaraSpendPage() {
   // K3 — Splash is shown until isLoaded fires + 400ms grace period.
   // Covers localStorage hydration so user never sees an empty/default-state flash.
   const [showSplash,       setShowSplash]       = useState(true);
-  // Responsive modal animation: bottom-sheet on mobile, centred on tablet+
-  // Computed once per render cycle — all modals reference this same value
-  const pageModalMode = getModalAnim();
-  const [data,             setData]             = useState<AppData>(defaultData);
+  // GN1 — First-run onboarding: 3-step tooltip overlay shown once after first budget is set
+  const [showOnboarding,   setShowOnboarding]   = useState(false);
+  const [onboardStep,      setOnboardStep]      = useState(0);
+  // GN2 — Compute modal mode once; update only on window resize (not every render)
+  const pageModalMode = useMemo(() => {
+    if (typeof window === "undefined") return "sheet" as const;
+    return window.innerWidth >= 768 ? "center" as const : "sheet" as const;
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  const [data, setData] = useState<AppData>(() => {
+    try {
+      const result = loadData();
+      return result.data ?? defaultData();
+    } catch {
+      return defaultData();
+    }
+  });
   const [storageCorrupted, setStorageCorrupted] = useState(false);
   const [selectedMonth,    setSelectedMonth]    = useState(todayMonthKey());
   const [swipeDir,         setSwipeDir]         = useState<1 | -1>(1);
@@ -965,6 +1013,14 @@ export default function ApsaraSpendPage() {
   const [openSwipeId,      setOpenSwipeId]      = useState<string | null>(null);
   const [confirmDeleteTx,  setConfirmDeleteTx]  = useState<Transaction | null>(null);
   const dragStarted = useRef(false);
+  // MN2 — swipe hint: only show on first session, hide after first successful swipe
+  const [showSwipeHint,    setShowSwipeHint]    = useState(
+    () => typeof window !== "undefined" ? !localStorage.getItem("apsara_seen_swipe_hint") : true
+  );
+  // TX1 — Row swipe affordance: auto-peek on first session so user discovers the action
+  const [hasSeenRowSwipe,  setHasSeenRowSwipe]  = useState(
+    () => typeof window !== "undefined" ? !!localStorage.getItem("apsara_seen_row_swipe") : false
+  );
   // I1 — Infinite scroll: show 10 rows at a time, load more as user scrolls
   const [visibleCount,     setVisibleCount]     = useState(10);
   // Fix: use callback ref instead of useRef so the observer attaches the moment
@@ -984,6 +1040,7 @@ export default function ApsaraSpendPage() {
   // O2 — monthly budget flow state
   const [showBudgetModal,  setShowBudgetModal]  = useState(false);
   const [budgetInput,      setBudgetInput]      = useState("");
+  const [budgetShake,      setBudgetShake]      = useState(false); // MO4
   // A2 — focus trap refs
   const budgetModalRef   = useRef<HTMLDivElement>(null);
   const settingsModalRef = useRef<HTMLDivElement>(null);
@@ -1018,13 +1075,20 @@ export default function ApsaraSpendPage() {
     if (storageCorrupted) showToast("Previous data could not be loaded — storage was corrupted.", "warn");
   }, [storageCorrupted, showToast]);
 
-  // K2 — Auto-dismiss splash: 400ms after data is loaded for a smooth handoff.
-  // The 400ms gives the entrance animation time to complete before fade-out begins.
+  // K2 — Auto-dismiss splash: 200ms after data is loaded (was 400ms — SP1 fix).
+  // 200ms is enough for the exit animation to start cleanly; faster on cached loads.
   useEffect(() => {
     if (!isLoaded) return;
-    const t = setTimeout(() => setShowSplash(false), 400);
+    const t = setTimeout(() => setShowSplash(false), 200);
     return () => clearTimeout(t);
   }, [isLoaded]);
+
+  // SP2 — Hard 3s safety timeout: forces splash away even if localStorage read hangs.
+  // Prevents the splash from showing forever on corrupted storage or slow devices.
+  useEffect(() => {
+    const hard = setTimeout(() => setShowSplash(false), 3000);
+    return () => clearTimeout(hard);
+  }, []);
 
   // D1 — Debounced localStorage write: state updates are instant (React),
   // but disk writes are batched every 300ms to prevent write-storm on rapid
@@ -1106,17 +1170,17 @@ export default function ApsaraSpendPage() {
       const result = await Notification.requestPermission();
       setNotifPermission(result as "default"|"granted"|"denied");
       if (result === "granted") {
-        showToast("Budget alerts enabled!", "success");
+        showToast("Budget alerts enabled.", "success");
         // E2 — Test notification so user knows it works
         new Notification("Apsara Spend", {
           body: "Budget alerts are now active. You'll be notified at 80% and 95%.",
           icon: "/icon-192.png",
         });
       } else {
-        showToast("Notifications blocked. Enable them in browser settings.", "warn");
+        showToast("Notifications blocked.", "warn");
       }
     } catch {
-      showToast("Could not request notification permission.", "warn");
+      showToast("Permission request failed.", "warn");
     }
   };
 
@@ -1151,10 +1215,14 @@ export default function ApsaraSpendPage() {
   );
 
   const categoryTotals = useMemo(() =>
-    CATEGORIES.map((c) => ({
-      ...c,
-      total: pin2(monthTxs.filter((t) => t.category === c.id).reduce((s, t) => s + t.amountUSD, 0)),
-    })).sort((a, b) => b.total - a.total || a.label.localeCompare(b.label)),
+    CATEGORIES.map((c) => {
+      const txs = monthTxs.filter((t) => t.category === c.id);
+      return {
+        ...c,
+        total: pin2(txs.reduce((s, t) => s + t.amountUSD, 0)),
+        count: txs.length,
+      };
+    }).sort((a, b) => b.total - a.total || a.label.localeCompare(b.label)),
     [monthTxs]
   );
 
@@ -1209,6 +1277,31 @@ export default function ApsaraSpendPage() {
   // Reset fired tiers on month switch so alerts re-arm for new month
   useEffect(() => { firedTiers.current = new Set(); }, [selectedMonth]);
 
+  // TX1 — Auto-peek first row: open 40px then snap back to show swipe affordance
+  useEffect(() => {
+    if (hasSeenRowSwipe || !isLoaded) return;
+    const monthKey = selectedMonth;
+    const txsThisMonth = data.transactions.filter(t => t.date.startsWith(monthKey.replace("-", "-").slice(0, 7)));
+    const firstId = txsThisMonth.sort((a, b) => b.date.localeCompare(a.date))[0]?.id;
+    if (!firstId) return;
+    const t1 = setTimeout(() => setOpenSwipeId(firstId), 1200);
+    const t2 = setTimeout(() => {
+      setOpenSwipeId(null);
+      setHasSeenRowSwipe(true);
+      localStorage.setItem("apsara_seen_row_swipe", "1");
+    }, 1900);
+    return () => { clearTimeout(t1); clearTimeout(t2); };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isLoaded, hasSeenRowSwipe]);
+
+  // TX2 — Close any open swipe row when the user scrolls (avoids stuck-open rows)
+  useEffect(() => {
+    if (!openSwipeId) return;
+    const close = () => setOpenSwipeId(null);
+    window.addEventListener("scroll", close, { passive: true });
+    return () => window.removeEventListener("scroll", close);
+  }, [openSwipeId]);
+
   // Reset visible count when month or filter changes so we always start at top
   useEffect(() => { setVisibleCount(10); }, [selectedMonth, filterCategory]);
 
@@ -1217,7 +1310,7 @@ export default function ApsaraSpendPage() {
   const navigateMonth = (delta: 1 | -1) => {
     const next = shiftMonth(selectedMonth, delta);
     if (delta === 1 && next > todayMonthKey()) {
-      showToast("Can't navigate to a future month.", "info");
+      showToast("No future months.", "info");
       return;
     }
     setSwipeDir(delta);
@@ -1229,6 +1322,11 @@ export default function ApsaraSpendPage() {
   const handleDragEnd = (_e: MouseEvent | TouchEvent | PointerEvent, info: PanInfo) => {
     if (info.offset.x > 60)       navigateMonth(-1);
     else if (info.offset.x < -60) navigateMonth(1);
+    // MN2 — hide swipe hint permanently after first swipe
+    if (Math.abs(info.offset.x) > 60 && showSwipeHint) {
+      setShowSwipeHint(false);
+      localStorage.setItem("apsara_seen_swipe_hint", "1");
+    }
   };
 
   // D2 — Optimistic CRUD: close the modal on the same frame as the user taps
@@ -1250,7 +1348,7 @@ export default function ApsaraSpendPage() {
           : [tx, ...d.transactions],
       };
     });
-    showToast(wasEdit ? "Expense updated." : "Expense added!", "success");
+    showToast(wasEdit ? "Expense updated." : "Expense added.", "success");
   };
 
   const handleDelete = (id: string) => {
@@ -1287,7 +1385,7 @@ export default function ApsaraSpendPage() {
   // No immutability lock — user can revise at any time (satisfies User 1).
   const handleSetBudget = () => {
     const amount = pin2(parseFloat(budgetInput) || 0);
-    if (amount <= 0) { showToast("Please enter a valid budget amount.", "info"); return; }
+    if (amount <= 0) { showToast("Enter a budget amount.", "info"); return; }
     const isEdit = selectedMonth in data.monthlyBalances && data.monthlyBalances[selectedMonth] > 0;
     setData((d) => ({
       ...d,
@@ -1301,6 +1399,10 @@ export default function ApsaraSpendPage() {
         : `Budget set to $${amount.toFixed(2)} for ${MONTH_FULL[month - 1]}.`,
       "success"
     );
+    // GN1 — show onboarding on first-ever budget set
+    if (!isEdit && typeof window !== "undefined" && !localStorage.getItem("apsara_onboarded")) {
+      setTimeout(() => { setOnboardStep(0); setShowOnboarding(true); }, 600);
+    }
   };
 
   const slideVariants = {
@@ -1322,14 +1424,19 @@ export default function ApsaraSpendPage() {
       <div style={{ padding: "24px 20px 20px" }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", marginBottom: 16 }}>
           <div>
-            <div style={{ fontSize: 11, color: "var(--color-text-lo)", letterSpacing: "0.14em", textTransform: "uppercase", marginBottom: 8, fontFamily: "var(--font-body)", fontWeight: 600 }}>
+            <div style={{ fontSize: 11, color: "var(--color-text-lo)", letterSpacing: "0.10em", textTransform: "uppercase", marginBottom: 6, fontFamily: "var(--font-body)", fontWeight: 500 }}>
               Total Spent
             </div>
-            <div style={{ fontSize: 36, fontWeight: 800, letterSpacing: "-0.03em", color: "var(--color-text-hi)", lineHeight: 1, fontFamily: "var(--font-headline)" }}>
-              {currency === "KHR"
-                ? `${Math.round(totalUSD * EXCHANGE_RATE).toLocaleString()} ៛`
-                : `$${totalUSD.toFixed(2)}`}
-            </div>
+            <AnimatePresence mode="wait">
+              <motion.div key={currency}
+                initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -6 }}
+                transition={{ duration: 0.16, ease: [0.4, 0, 0.2, 1] }}
+                style={{ fontSize: 36, fontWeight: 800, letterSpacing: "-0.03em", color: "var(--color-text-hi)", lineHeight: 1, fontFamily: "var(--font-headline)" }}>
+                {currency === "KHR"
+                  ? `${Math.round(totalUSD * EXCHANGE_RATE).toLocaleString()} ៛`
+                  : `$${totalUSD.toFixed(2)}`}
+              </motion.div>
+            </AnimatePresence>
             {/* N3 — period label */}
             <div style={{ fontSize: 11, color: "var(--color-text-lo)", marginTop: 6, fontFamily: "var(--font-body)", letterSpacing: "0.04em" }}>
               {MONTH_FULL[month - 1]} {year}
@@ -1386,7 +1493,7 @@ export default function ApsaraSpendPage() {
       {/* ── Hairline divider + Breakdown section (only when there is data) ── */}
       {hasBreakdown && (
         <>
-          <div style={{ height: 1, background: "#1a2333", margin: "0 24px" }} />
+          <div style={{ height: 1, background: "var(--color-border)", margin: "0 24px" }} />
           <div style={{ padding: "20px 20px 24px" }}>
             <div style={{ fontSize: 11, color: "var(--color-text-lo)", letterSpacing: "0.14em", textTransform: "uppercase", marginBottom: 16, fontFamily: "var(--font-body)", fontWeight: 600 }}>
               Breakdown
@@ -1399,8 +1506,13 @@ export default function ApsaraSpendPage() {
                   style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: i < categoryTotals.filter(x => x.total > 0).length - 1 ? 12 : 0, borderRadius: 10, padding: "4px 4px", marginLeft: -4, marginRight: -4 }}>
                   <CategoryIcon cat={c} active />
                   <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4 }}>
-                      <span style={{ fontSize: 14, fontWeight: 600, color: "var(--color-text-mid)", fontFamily: "var(--font-body)" }}>{c.label}</span>
+                    <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4, alignItems: "baseline" }}>
+                      <div>
+                        <span style={{ fontSize: 14, fontWeight: 600, color: "var(--color-text-mid)", fontFamily: "var(--font-body)" }}>{c.label}</span>
+                        <span style={{ fontSize: 10, color: "var(--color-text-lo)", fontFamily: "var(--font-body)", marginLeft: 6, opacity: 0.7 }}>
+                          {c.count} {c.count === 1 ? "item" : "items"}
+                        </span>
+                      </div>
                       <span style={{ fontSize: 13, fontWeight: 700, color: c.color, fontFamily: "var(--font-mono)" }}>{fmt(c.total)}</span>
                     </div>
                     <div style={{ background: "var(--color-bg-page)", borderRadius: 999, height: 4, overflow: "hidden" }}>
@@ -1431,7 +1543,7 @@ export default function ApsaraSpendPage() {
         style={{ marginBottom: 16 }}
       >
         {/* Wallet body */}
-        <rect x="8" y="28" width="88" height="44" rx="8" fill="#1e2a38" />
+        <rect x="8" y="28" width="88" height="44" rx="8" fill="var(--color-bg-nav)" />
         {/* Wallet flap */}
         <path d="M8 36 Q8 28 16 28 H80 Q88 28 88 36 V44 H8 Z" fill="var(--color-bg-nav)" />
         {/* Flap fold line */}
@@ -1578,15 +1690,33 @@ export default function ApsaraSpendPage() {
         );
         const visible  = sorted.slice(0, visibleCount);
         const hasMore  = visibleCount < sorted.length;
+
+        // TX3 — build a set of dates that need a group header above them
+        const todayStr     = localDateString();
+        const yesterdayStr = localDateString(new Date(Date.now() - 86400000));
+        const dateLabel    = (d: string) =>
+          d === todayStr     ? "Today"
+          : d === yesterdayStr ? "Yesterday"
+          : formatDisplayDate(d);
+        const seenDates = new Set<string>();
         return (
           <>
             {visible.map((tx, i) => {
-            const cat     = CATEGORIES.find((c) => c.id === tx.category) ?? CATEGORIES[5];
-            const dateStr = formatDisplayDate(localDateString(new Date(tx.date)));
-            const isLast  = i === visible.length - 1 && !hasMore;
-            const isOpen  = openSwipeId === tx.id;
+            const cat      = CATEGORIES.find((c) => c.id === tx.category) ?? CATEGORIES[5];
+            const dateStr  = formatDisplayDate(localDateString(new Date(tx.date)));
+            const txDate   = localDateString(new Date(tx.date));
+            const isFirst  = !seenDates.has(txDate);
+            if (isFirst) seenDates.add(txDate);
+            const isLast   = i === visible.length - 1 && !hasMore;
+            const isOpen   = openSwipeId === tx.id;
             return (
-              <div key={tx.id} style={{ position: "relative", overflow: "hidden",
+              <React.Fragment key={tx.id}>
+              {isFirst && (
+                <div style={{ fontSize: 11, fontWeight: 600, color: "var(--color-text-lo)", fontFamily: "var(--font-body)", letterSpacing: "0.08em", textTransform: "uppercase", padding: i === 0 ? "2px 0 6px" : "14px 0 6px" }}>
+                  {dateLabel(txDate)}
+                </div>
+              )}
+              <div style={{ position: "relative", overflow: "hidden",
                 borderBottom: isLast ? "none" : "1px solid var(--color-border)" }}>
 
                 {/* S1 — Two-button reveal zone: EDIT (left) | DELETE (right) */}
@@ -1639,6 +1769,7 @@ export default function ApsaraSpendPage() {
                 >
                   <motion.button
                     initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: i * 0.03 }}
+                    aria-label={`${tx.note || cat.label}, ${fmt(tx.amountUSD)}, ${dateStr}. Press E to edit, Delete to remove.`}
                     onClick={() => {
                       // S4 — block accidental edit if drag just finished
                       if (dragStarted.current) return;
@@ -1668,6 +1799,7 @@ export default function ApsaraSpendPage() {
                   </motion.button>
                 </motion.div>
               </div>
+              </React.Fragment>
             );
           })}
 
@@ -1884,9 +2016,9 @@ export default function ApsaraSpendPage() {
           outline: none !important;
         }
 
-        /* Remove browser default focus outline on Settings theme tab buttons */
+        /* HD3 — Focus ring: 3px offset + 2px width ensures ≥3:1 contrast in light mode */
         button:focus { outline: none; }
-        button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+        button:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 4px; }
 
         /* Fix 4 — Placeholder text uses --color-text-hi so it reads correctly in light mode */
         ::placeholder { color: var(--color-text-lo); opacity: 1; }
@@ -1931,7 +2063,7 @@ export default function ApsaraSpendPage() {
           z-index: 30;
           backdrop-filter: blur(16px) saturate(1.4);
           -webkit-backdrop-filter: blur(16px) saturate(1.4);
-          background: color-mix(in srgb, var(--color-bg-page) 85%, transparent);
+          background: color-mix(in srgb, var(--color-bg-page) 95%, transparent);
           border-bottom: 0.5px solid color-mix(in srgb, var(--color-border) 60%, transparent);
         }
 
@@ -2006,6 +2138,15 @@ export default function ApsaraSpendPage() {
         @keyframes hintFade { from { opacity: 0; } to { opacity: 1; } }
         .swipe-hint { animation: hintFade 0.5s ease 0.8s both; }
 
+        @keyframes nudge {
+          0%, 100% { transform: translateX(0); }
+          20%       { transform: translateX(-6px); }
+          40%       { transform: translateX(6px); }
+          60%       { transform: translateX(-4px); }
+          80%       { transform: translateX(4px); }
+        }
+        .btn-nudge { animation: nudge 0.35s ease; }
+
         @keyframes pulseGlow {
           0%, 100% { box-shadow: 0 0 16px var(--accent-glow); }
           50%       { box-shadow: 0 0 28px var(--accent-glow); }
@@ -2017,6 +2158,11 @@ export default function ApsaraSpendPage() {
         @keyframes shimmer {
           0%   { background-position: -200% 0; }
           100% { background-position:  200% 0; }
+        }
+        /* FA3 — Disable looping animations for users who prefer reduced motion */
+        @media (prefers-reduced-motion: reduce) {
+          * { animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; }
+          .skeleton { animation: none !important; background: var(--color-bg-nav); }
         }
         /* J1 — SkeletonCard: uses CSS vars so it adapts to light/dark theme */
         .skeleton {
@@ -2115,6 +2261,60 @@ export default function ApsaraSpendPage() {
         )}
       </AnimatePresence>
 
+      {/* ════ GN1  FIRST-RUN ONBOARDING — 3-step tooltip overlay ════ */}
+      <AnimatePresence>
+        {showOnboarding && (() => {
+          const steps = [
+            { icon: "💰", title: "Budget first", body: "You've set your budget. Every expense tracks against it — you'll always know what's left." },
+            { icon: "➕", title: "Log expenses", body: "Tap Add Expense to log anything instantly. Choose USD or KHR, pick a category, add a note." },
+            { icon: "👆", title: "Swipe to manage", body: "Swipe any expense row left to reveal Edit and Delete actions." },
+          ];
+          const step = steps[onboardStep];
+          const isLast = onboardStep === steps.length - 1;
+          const dismiss = () => {
+            setShowOnboarding(false);
+            localStorage.setItem("apsara_onboarded", "1");
+          };
+          return (
+            <motion.div
+              key="onboarding"
+              initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+              transition={{ duration: 0.25 }}
+              style={{ position: "fixed", inset: 0, background: "rgba(5,7,12,0.82)", zIndex: 900, display: "flex", alignItems: "flex-end", justifyContent: "center", padding: "0 16px calc(24px + env(safe-area-inset-bottom))" }}
+              onClick={dismiss}
+            >
+              <motion.div
+                key={onboardStep}
+                initial={{ opacity: 0, y: 24 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 12 }}
+                transition={{ type: "spring", damping: 28, stiffness: 320 }}
+                style={{ background: "var(--color-bg-card)", borderRadius: 20, padding: "24px 24px 20px", width: "100%", maxWidth: 420, border: "1px solid var(--color-border-mid)" }}
+                onClick={(e) => e.stopPropagation()}
+              >
+                {/* Progress dots */}
+                <div style={{ display: "flex", justifyContent: "center", gap: 6, marginBottom: 20 }}>
+                  {steps.map((_, i) => (
+                    <div key={i} style={{ width: i === onboardStep ? 20 : 6, height: 6, borderRadius: 99, background: i === onboardStep ? "var(--accent)" : "var(--color-border-mid)", transition: "all 0.25s" }} />
+                  ))}
+                </div>
+                {/* Content */}
+                <div style={{ fontSize: 28, textAlign: "center", marginBottom: 10 }}>{step.icon}</div>
+                <div style={{ fontSize: 18, fontWeight: 700, color: "var(--color-text-hi)", fontFamily: "var(--font-headline)", textAlign: "center", marginBottom: 8 }}>{step.title}</div>
+                <div style={{ fontSize: 14, color: "var(--color-text-lo)", fontFamily: "var(--font-body)", textAlign: "center", lineHeight: 1.6, marginBottom: 20 }}>{step.body}</div>
+                {/* Actions */}
+                <div style={{ display: "flex", gap: 10 }}>
+                  <button onClick={dismiss} style={{ padding: "11px 0", borderRadius: 12, border: "1px solid var(--color-border-mid)", background: "transparent", color: "var(--color-text-lo)", fontSize: 14, fontFamily: "var(--font-body)", cursor: "pointer", flex: 1 }}>Skip</button>
+                  <button
+                    onClick={() => isLast ? dismiss() : setOnboardStep((s) => s + 1)}
+                    style={{ padding: "11px 0", borderRadius: 12, border: "none", background: "linear-gradient(135deg, var(--accent), var(--accent-dim))", color: "var(--accent-text)", fontSize: 14, fontWeight: 700, fontFamily: "var(--font-body)", cursor: "pointer", flex: 2 }}>
+                    {isLast ? "Get started" : "Next →"}
+                  </button>
+                </div>
+              </motion.div>
+            </motion.div>
+          );
+        })()}
+      </AnimatePresence>
+
       <main className="main-wrap"
         style={{
           fontFamily: "var(--font-body)",
@@ -2132,7 +2332,7 @@ export default function ApsaraSpendPage() {
           background: "radial-gradient(circle, var(--accent-muted) 0%, transparent 68%)",
         }} />
 
-        <div className="main-scroll" style={{ position: "relative", zIndex: 1, paddingBottom: "calc(120px + env(safe-area-inset-bottom))" }}>
+        <div className="main-scroll" style={{ position: "relative", zIndex: 1, paddingBottom: "calc(160px + env(safe-area-inset-bottom))" }}>
 
           {/* ════ STICKY HEADER — app title + month navigation ════ */}
           <div className="sticky-header">
@@ -2142,32 +2342,16 @@ export default function ApsaraSpendPage() {
             {/* J2 — Header skeleton while hydrating */}
             {!isLoaded ? (
               <div style={{ display: "flex", flexDirection: "column", gap: 8, paddingTop: 4 }}>
-                <div className="skeleton skeleton-round" style={{ width: 100, height: 10 }} />
                 <div className="skeleton skeleton-round" style={{ width: 180, height: 28 }} />
                 <div className="skeleton skeleton-round" style={{ width: 140, height: 10 }} />
               </div>
             ) : (
             <div>
-              <div style={{ fontSize: 11, letterSpacing: "0.20em", color: "var(--color-text-lo)", textTransform: "uppercase", marginBottom: 8, fontFamily: "var(--font-body)", fontWeight: 600 }}>
-                Personal Tracker
-              </div>
               <h1 style={{ fontSize: 32, fontWeight: 800, letterSpacing: "-0.02em", margin: 0, color: "var(--color-text-hi)", fontFamily: "var(--font-headline)", lineHeight: 1.1 }}>
                 Apsara <span style={{ color: "var(--accent)" }}>Spend</span>
               </h1>
               <div style={{ fontSize: 11, color: "var(--color-text-lo)", letterSpacing: "0.06em", marginTop: 6, fontFamily: "var(--font-body)", display: "flex", alignItems: "center", gap: 8 }}>
                 1 USD = 4,000 ៛ · Fixed rate
-                {hasMonthBudget ? (
-                  <button onClick={() => { setBudgetInput(String(monthBalance)); setShowBudgetModal(true); }}
-                    style={{ background: "var(--accent-muted)", border: "1px solid var(--accent-border)", color: "var(--accent)", borderRadius: 99, padding: "1px 8px", fontSize: 10, fontWeight: 600, letterSpacing: "0.06em", cursor: "pointer", fontFamily: "var(--font-body)", display: "flex", alignItems: "center", gap: 4 }}>
-                    ${(data.monthlyBalances[selectedMonth]).toFixed(0)} budget
-                    <Pencil size={8} color="var(--accent)" strokeWidth={2} />
-                  </button>
-                ) : (
-                  <button onClick={() => setShowBudgetModal(true)}
-                    style={{ background: "none", border: "none", color: "var(--accent)", fontSize: 10, fontWeight: 600, cursor: "pointer", padding: 0, fontFamily: "var(--font-body)", letterSpacing: "0.06em" }}>
-                    + Set budget
-                  </button>
-                )}
               </div>
             </div>
             )}
@@ -2205,10 +2389,11 @@ export default function ApsaraSpendPage() {
                   style={{ textAlign: "center" }}>
                   {/* M2 — Tappable month name: precise target, auto-width only */}
                   <button aria-label="Open month picker" onClick={() => setShowPicker(true)}
-                    style={{ background: "none", border: "none", cursor: "pointer", padding: "2px 8px", borderRadius: 8 }}>
+                    style={{ background: "none", border: "none", cursor: "pointer", padding: "2px 8px", borderRadius: 8, display: "inline-flex", alignItems: "center", gap: 5 }}>
                     <div style={{ fontSize: 24, fontWeight: 700, color: "var(--color-text-hi)", letterSpacing: "-0.01em", fontFamily: "var(--font-headline)", lineHeight: 1.1 }}>
                       {MONTH_FULL[month - 1]}
                     </div>
+                    <ChevronDown size={14} color="var(--color-text-lo)" strokeWidth={2.5} style={{ marginTop: 2, opacity: 0.7 }} />
                   </button>
                   <div style={{ fontSize: 13, color: "var(--color-text-lo)", marginTop: 4, fontWeight: 500, fontFamily: "var(--font-body)" }}>
                     {year}{isCurrentMonth && <span style={{ color: "var(--accent)", fontSize: 11, letterSpacing: "0.08em", marginLeft: 6, fontFamily: "var(--font-body)", fontWeight: 600, display: "inline-flex", alignItems: "center", gap: 3 }}><Circle size={6} fill="var(--accent)" color="var(--accent)" /> NOW</span>}
@@ -2217,7 +2402,9 @@ export default function ApsaraSpendPage() {
               </AnimatePresence>
             </div>
 
-            <button aria-label="Next month" onClick={() => navigateMonth(1)} disabled={isCurrentMonth}
+            <button aria-label="Next month"
+              aria-description={isCurrentMonth ? "Cannot navigate past current month" : undefined}
+              onClick={() => navigateMonth(1)} disabled={isCurrentMonth}
               style={{
                 background: isCurrentMonth ? "transparent" : "var(--color-bg-nav)",
                 border: "1px solid var(--color-border-mid)",
@@ -2238,7 +2425,7 @@ export default function ApsaraSpendPage() {
           {/* ════ SWIPEABLE DASHBOARD ════ */}
           <motion.div drag="x" dragConstraints={{ left: 0, right: 0 }} dragElastic={0.12}
             onDragEnd={handleDragEnd}
-            onClick={() => showFilterMenu && setShowFilterMenu(false)}
+            onClick={() => { showFilterMenu && setShowFilterMenu(false); openSwipeId && setOpenSwipeId(null); }}
             style={{ cursor: "grab", touchAction: "pan-y" }}>
             <AnimatePresence mode="wait" custom={swipeDir}>
               <motion.div key={selectedMonth} custom={swipeDir} variants={slideVariants}
@@ -2329,9 +2516,11 @@ export default function ApsaraSpendPage() {
             </AnimatePresence>
           </motion.div>
 
+          {showSwipeHint && (
           <div className="swipe-hint" style={{ textAlign: "center", marginTop: 14, fontSize: 11, color: "var(--color-text-ghost)", letterSpacing: "0.1em", fontFamily: "var(--font-body)" }}>
             ← SWIPE TO NAVIGATE MONTHS →
           </div>
+          )}
         </div>
 
         {/* ════ FAB — Floating Action Button, shown after budget is set ════ */}
@@ -2340,10 +2529,11 @@ export default function ApsaraSpendPage() {
         <motion.button
           whileTap={{ scale: fabDisabled ? 1 : 0.94 }}
           whileHover={{ scale: fabDisabled ? 1 : 1.04 }}
-          aria-label={fabDisabled ? "Monthly budget reached" : "Add new expense"}
+          aria-label={fabDisabled ? "Monthly budget reached — cannot add more expenses" : "Add new expense"}
+          aria-disabled={fabDisabled}
           onClick={() => {
             if (fabDisabled) {
-              showToast("This entry exceeds your planned monthly balance. Let's maintain your financial goals.", "warn");
+              showToast("Budget limit reached.", "warn");
               return;
             }
             setEditTx(null);
@@ -2367,7 +2557,6 @@ export default function ApsaraSpendPage() {
             animation: fabDisabled ? "none" : "pulseGlow 3s ease-in-out infinite",
             minHeight: 52,
             opacity: fabDisabled ? 0.7 : 1,
-            // Layered shadow: high elevation so FAB clearly floats above expense rows
             boxShadow: fabDisabled
               ? "0 2px 8px rgba(0,0,0,0.12)"
               : "0 8px 28px rgba(0,0,0,0.28), 0 2px 8px rgba(0,0,0,0.16)",
@@ -2376,6 +2565,12 @@ export default function ApsaraSpendPage() {
           <Plus size={18} color={fabDisabled ? "var(--color-text-lo)" : "var(--accent-text)"} strokeWidth={3} />
           {fabDisabled ? "Budget Reached" : "Add Expense"}
         </motion.button>
+        {/* FA2 — persistent caption under the FAB when budget is hit */}
+        {fabDisabled && (
+          <div style={{ textAlign: "center", marginTop: 6, fontSize: 10, color: "var(--color-text-lo)", fontFamily: "var(--font-body)", letterSpacing: "0.04em" }}>
+            Monthly limit reached · adjust budget to continue
+          </div>
+        )}
         </div>
         )}{/* end FAB gate */}
 
@@ -2532,18 +2727,25 @@ export default function ApsaraSpendPage() {
                   </span>
                 </div>
 
-                {/* Confirm button */}
+                {/* Confirm button — MO4: nudge animation instead of silent disabled state */}
                 <button
-                  onClick={handleSetBudget}
-                  disabled={!budgetInput || parseFloat(budgetInput) <= 0}
+                  className={budgetShake ? "btn-nudge" : ""}
+                  onClick={() => {
+                    if (!budgetInput || parseFloat(budgetInput) <= 0) {
+                      setBudgetShake(true);
+                      setTimeout(() => setBudgetShake(false), 400);
+                      return;
+                    }
+                    handleSetBudget();
+                  }}
                   style={{
                     width: "100%", padding: "16px", borderRadius: 16, border: "none",
                     background: !budgetInput || parseFloat(budgetInput) <= 0
                       ? "var(--color-border-mid)" : "linear-gradient(135deg, var(--accent) 0%, var(--accent-dim) 100%)",
                     color: !budgetInput || parseFloat(budgetInput) <= 0 ? "var(--color-text-lo)" : "var(--accent-text)",
                     fontSize: 16, fontWeight: 700, fontFamily: "var(--font-headline)",
-                    cursor: !budgetInput || parseFloat(budgetInput) <= 0 ? "not-allowed" : "pointer",
-                    transition: "all 0.2s",
+                    cursor: "pointer",
+                    transition: "background 0.2s, color 0.2s",
                   }}>
                   {monthBalance > 0 ? "Update Budget" : "Confirm Budget"}
                 </button>
@@ -2586,9 +2788,12 @@ export default function ApsaraSpendPage() {
                   {/* Theme toggle */}
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
                     <span style={{ fontSize: 13, fontWeight: 600, color: "var(--color-text-mid)", fontFamily: "var(--font-body)" }}>Theme</span>
-                    <div style={{ display: "flex", background: "var(--color-bg-nav)", borderRadius: 10, padding: 3, gap: 3 }}>
+                    <div role="radiogroup" aria-label="Theme mode" style={{ display: "flex", background: "var(--color-bg-nav)", borderRadius: 10, padding: 3, gap: 3 }}>
                       {(["dark", "system", "light"] as const).map((m) => (
-                        <button key={m} onClick={() => setThemeMode(m)}
+                        <button key={m}
+                          role="radio"
+                          aria-checked={themeMode === m}
+                          onClick={() => setThemeMode(m)}
                           style={{
                             padding: "6px 12px", borderRadius: 7, border: "none", cursor: "pointer",
                             background: themeMode === m ? "var(--accent)" : "transparent",
@@ -2631,9 +2836,12 @@ export default function ApsaraSpendPage() {
                   <div>
                     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
                       <span style={{ fontSize: 13, fontWeight: 600, color: "var(--color-text-mid)", fontFamily: "var(--font-body)" }}>Budget Mode</span>
-                      <div style={{ display: "flex", background: "var(--color-bg-nav)", borderRadius: 10, padding: 3, gap: 3 }}>
+                      <div role="radiogroup" aria-label="Budget mode" style={{ display: "flex", background: "var(--color-bg-nav)", borderRadius: 10, padding: 3, gap: 3 }}>
                         {(["soft", "hard"] as const).map((m) => (
-                          <button key={m} onClick={() => setConstraintMode(m)}
+                          <button key={m}
+                            role="radio"
+                            aria-checked={constraintMode === m}
+                            onClick={() => setConstraintMode(m)}
                             style={{
                               padding: "6px 14px", borderRadius: 7, border: "none", cursor: "pointer",
                               background: constraintMode === m ? "var(--accent)" : "transparent",
@@ -2725,7 +2933,7 @@ export default function ApsaraSpendPage() {
                       </div>
                       <div style={{ display: "flex", gap: 8 }}>
                         <button onClick={() => setResetConfirm(false)}
-                          style={{ flex: 1, padding: 12, background: "var(--color-bg-nav)", border: "1px solid #2d3748", color: "var(--color-text-lo)", borderRadius: 10, cursor: "pointer", fontSize: 14, fontWeight: 600, fontFamily: "var(--font-body)" }}>
+                          style={{ flex: 1, padding: 12, background: "var(--color-bg-nav)", border: "1px solid var(--color-border-mid)", color: "var(--color-text-lo)", borderRadius: 10, cursor: "pointer", fontSize: 14, fontWeight: 600, fontFamily: "var(--font-body)" }}>
                           Cancel
                         </button>
                         <button onClick={handleResetMonth}
