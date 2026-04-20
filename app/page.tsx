@@ -5,7 +5,7 @@ import { motion, AnimatePresence, PanInfo } from "framer-motion";
 import {
   Settings, ChevronLeft, ChevronRight, ChevronDown, X, Trash2, Plus,
   UtensilsCrossed, Bike, Zap, Users, ShoppingBag, MoreHorizontal,
-  CalendarDays, Lightbulb, Lock, Check, AlertTriangle, Circle, Pencil,
+  CalendarDays, Lightbulb, Lock, Check, AlertTriangle, Circle, Pencil, Receipt,
   type LucideIcon,
 } from "lucide-react";
 
@@ -34,6 +34,7 @@ interface AppData {
 interface Toast {
   msg: string;
   type: "warn" | "info" | "success";
+  undoFn?: () => void; // optional undo callback shown as pill in toast
 }
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -102,9 +103,12 @@ const sanitizeText = (s: string) => s.replace(/[<>"'`]/g, "").slice(0, 100);
 // USD sanitiser — digits + single decimal, max 4 integer digits ($9,999 max), max 2 decimal places
 // e.g. "12345" → "1234"  |  "9.999" → "9.99"  |  "1234.567" → "1234.56"
 const sanitizeNum = (s: string): string => {
+  // Strip non-numeric chars except decimal point
   const stripped = s.replace(/[^0-9.]/g, "");
   const m = stripped.match(/^(\d{0,4})(\.?)(\d{0,2}).*$/);
-  return m ? m[1] + m[2] + m[3] : "";
+  if (!m) return "";
+  let intPart = m[1].replace(/^0+(?=\d)/, ""); // strip leading zeros before non-zero digit
+  return intPart + m[2] + m[3];
 };
 
 // KHR display formatter — converts raw digit string to comma-separated thousands
@@ -116,8 +120,11 @@ const formatKHRDisplay = (raw: string): string => {
   return isNaN(n) ? "" : n.toLocaleString("en-US");
 };
 
-// § 2  KHR sanitiser — integers only (no decimals for physical currency)
-const sanitizeKHR = (s: string) => s.replace(/[^0-9]/g, "");
+// § 2  KHR sanitiser — integers only, no leading zeros
+const sanitizeKHR = (s: string) => {
+  const digits = s.replace(/[^0-9]/g, "");
+  return digits.replace(/^0+(?=\d)/, ""); // strip leading zeros before non-zero digit
+};
 
 // § 2  Snap a KHR value to the nearest valid denomination (multiple of KHR_STEP)
 // Calculation freedom: returns the raw integer for display; USD conversion uses the raw value
@@ -264,20 +271,16 @@ function BudgetBar({ total, monthBudget, onSetBudget, onEditBudget }: {
 
   return (
     <div>
-      <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8 }}>
-        <span style={{ fontSize: 11, color: "var(--color-text-lo)", letterSpacing: "0.12em", textTransform: "uppercase", fontFamily: "var(--font-body)", fontWeight: 600 }}>
-          Budget
+      {/* Tier label + % inline above bar — no "BUDGET" eyebrow */}
+      <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6, alignItems: "center" }}>
+        <span style={{ fontSize: 11, fontWeight: 600, color: tierColor, transition: "color 0.3s", fontFamily: "var(--font-body)" }}>
+          {tierLabel}
         </span>
-        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          {total > 0 && (
-            <span style={{ fontSize: 11, fontWeight: 600, color: "var(--color-text-lo)", fontFamily: "var(--font-mono)" }}>
-              {pctDisplay}%
-            </span>
-          )}
-          <span style={{ fontSize: 11, fontWeight: 700, color: tierColor, transition: "color 0.3s", fontFamily: "var(--font-body)" }}>
-            {tierLabel}
+        {total > 0 && (
+          <span style={{ fontSize: 11, fontWeight: 500, color: "var(--color-text-lo)", fontFamily: "var(--font-mono)" }}>
+            {pctDisplay}%
           </span>
-        </div>
+        )}
       </div>
       <div
         role="progressbar"
@@ -296,8 +299,7 @@ function BudgetBar({ total, monthBudget, onSetBudget, onEditBudget }: {
           }}
         />
       </div>
-      <div style={{ display: "flex", justifyContent: "space-between", marginTop: 8, alignItems: "center" }}>
-        <span style={{ fontSize: 11, color: "var(--color-text-lo)", fontFamily: "var(--font-body)" }}>$0</span>
+      <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 6, alignItems: "center" }}>
         {/* F1 / A3 — edit budget: prominent CTA when over budget, subtle pencil otherwise */}
         {isOver ? (
           <button onClick={onEditBudget}
@@ -404,13 +406,13 @@ function MonthPicker({ current, onSelect, onClose }: {
       >
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}>
           <button aria-label="Previous year" onClick={() => setPickerYear((y) => y - 1)}
-            style={{ background: "var(--color-bg-nav)", border: "none", borderRadius: 10, padding: 10, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}>
+            style={{ background: "none", border: "none", borderRadius: 10, padding: 10, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}>
             <ChevronLeft className="icon-nav" color="var(--color-text-lo)" strokeWidth={2} />
           </button>
           <span style={{ fontSize: 20, fontWeight: 600, color: "var(--color-text-hi)", letterSpacing: "-0.01em", fontFamily: "var(--font-headline)" }}>{pickerYear}</span>
           <button aria-label="Next year" onClick={() => setPickerYear((y) => y + 1)} disabled={atMax}
             style={{
-              background: "var(--color-bg-nav)", border: "none", borderRadius: 10, padding: 10,
+              background: "none", border: "none", borderRadius: 10, padding: 10,
               cursor: atMax ? "default" : "pointer",
               display: "flex", alignItems: "center", justifyContent: "center",
               opacity: atMax ? 0.3 : 1, transition: "opacity 0.2s",
@@ -428,8 +430,6 @@ function MonthPicker({ current, onSelect, onClose }: {
                   padding: "11px 4px", borderRadius: 12, position: "relative",
                   border: isSelected ? "2px solid var(--accent)" : "1px solid transparent",
                   background: isSelected ? "var(--accent-muted)" : isToday ? "var(--color-border)" : "transparent",
-                  // Future months: opacity-based disable — clear on both dark and light themes
-                  // Past/present months: full text-mid color — readable on both themes
                   color: isSelected ? "var(--accent)" : "var(--color-text-mid)",
                   opacity: isFuture ? 0.3 : 1,
                   fontFamily: "var(--font-body)",
@@ -465,12 +465,12 @@ const MODAL_EXIT_CENTER  = { opacity: 0, scale: 0.96, y: 8 };
 
 // ─── EntryModal ───────────────────────────────────────────────────────────────
 
-function EntryModal({ tx, selectedMonth, monthBalance, totalUSD: currentTotal, constraintMode, onSave, onDelete, onClose }: {
+function EntryModal({ tx, selectedMonth, monthBalance, totalUSD: currentTotal, constraintMode, onSave, onDelete, onRequestDelete, onClose }: {
   tx: Transaction | null; selectedMonth: string;
   monthBalance: number;
   totalUSD: number;
   constraintMode: "soft" | "hard"; // C1 — controls whether over-budget is blocked or warned
-  onSave: (t: Transaction) => void; onDelete?: (id: string) => void; onClose: () => void;
+  onSave: (t: Transaction) => void; onDelete?: (id: string) => void; onRequestDelete?: (tx: Transaction) => void; onClose: () => void;
 }) {
   const isEdit = !!tx;
 
@@ -490,9 +490,7 @@ function EntryModal({ tx, selectedMonth, monthBalance, totalUSD: currentTotal, c
   const [cat,           setCat]           = useState<CategoryId>(tx?.category ?? "food");
   const [note,          setNote]          = useState(tx?.note ?? "");
   const [date,          setDate]          = useState(defaultDate);
-  const [deleteConfirm, setDeleteConfirm] = useState(false);
   const [shake,         setShake]         = useState(false);
-  const [showDiscard,   setShowDiscard]   = useState(false); // MO2 — discard guard
   const [amtFocused,    setAmtFocused]    = useState(false);
   const [dateFocused,   setDateFocused]   = useState(false);
   // § 2  KHR denomination hint state — shown when amount is not a multiple of KHR_STEP
@@ -542,7 +540,7 @@ function EntryModal({ tx, selectedMonth, monthBalance, totalUSD: currentTotal, c
   // but must not be passed to parseInt for the raw stored value.
   const handleKHRChange = (val: string) => {
     // Max 8 raw digits: 9,999.99 USD × 4,000 = 39,999,960 KHR = 8 digits
-    const digits = val.replace(/[^0-9]/g, "").slice(0, 8);
+    const digits = val.replace(/[^0-9]/g, "").replace(/^0+(?=\d)/, "").slice(0, 8);
     setRawAmount(digits);
     const v = parseInt(digits, 10) || 0;
     setKhrHint(v > 0 && v % KHR_STEP !== 0);
@@ -613,14 +611,7 @@ function EntryModal({ tx, selectedMonth, monthBalance, totalUSD: currentTotal, c
       initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
       className="modal-backdrop"
       style={{ position: "fixed", inset: 0, background: "rgba(5,7,12,0.9)", zIndex: 200, display: "flex" }}
-      onClick={() => {
-        // MO2 — if user has typed an amount or note, confirm before discarding
-        if ((rawAmount && parseFloat(rawAmount) > 0) || note.trim()) {
-          setShowDiscard(true);
-        } else {
-          onClose();
-        }
-      }}
+      onClick={onClose}
     >
       <motion.div
         ref={modalRef}
@@ -686,15 +677,12 @@ function EntryModal({ tx, selectedMonth, monthBalance, totalUSD: currentTotal, c
             onBlur={() => { setAmtFocused(false); handleAmountBlur(); }}
             onWheel={(e) => e.currentTarget.blur()}
             placeholder={currency === "USD" ? "0.00" : "0"}
-            className="focus-input"
+            className="input-field focus-input"
             style={{
               width: "100%", boxSizing: "border-box",
-              background: "var(--color-bg-input)",
-              border: `1.5px solid ${borderColor}`,
-              borderRadius: 12,
               padding: "14px 44px 14px 50px",
-              fontSize: amountFontSize, fontWeight: 800, color: "var(--color-text-hi)", outline: "none",
-              fontFamily: "var(--font-mono)",
+              fontSize: amountFontSize, fontWeight: 800, fontFamily: "var(--font-mono)",
+              border: `1.5px solid ${borderColor}`,
               boxShadow: amtBoxShadow,
               transition: "border-color 0.18s, box-shadow 0.18s, font-size 0.12s ease",
             }}
@@ -762,8 +750,8 @@ function EntryModal({ tx, selectedMonth, monthBalance, totalUSD: currentTotal, c
           onKeyDown={(e) => e.key === "Enter" && handleSave()}
           placeholder="Note (optional, max 100 chars)..."
           maxLength={100}
-          className="focus-input"
-          style={{ width: "100%", boxSizing: "border-box", background: "var(--color-bg-input)", border: "1.5px solid var(--color-border)", borderRadius: 12, padding: "14px 16px", fontSize: 16, fontFamily: "var(--font-body)", lineHeight: 1.5, color: "var(--color-text-hi)", outline: "none", marginBottom: 16 }}
+          className="input-field"
+          style={{ width: "100%", boxSizing: "border-box", padding: "14px 16px", fontSize: 16, fontFamily: "var(--font-body)", lineHeight: 1.5, marginBottom: 16 }}
         />
 
         {/* ── Date picker — article technique: full-area transparent overlay ──
@@ -779,19 +767,21 @@ function EntryModal({ tx, selectedMonth, monthBalance, totalUSD: currentTotal, c
 
           {/* ── Display layer (behind, pointer-events:none) ── */}
           <div
-            className="focus-input"
+            className="input-field"
             style={{
               display: "flex", alignItems: "center",
-              background: "var(--color-bg-input)",
               borderRadius: 12,
               padding: "14px 16px",
               minHeight: 48,
               pointerEvents: "none",
               userSelect: "none",
+              transition: "border 0.18s, box-shadow 0.18s",
               ...(dateFocused ? {
-                borderColor: "var(--accent)",
+                border: "1.5px solid var(--accent)",
                 boxShadow: "0 0 0 3px var(--accent-muted)",
-              } : {}),
+              } : {
+                border: "1.5px solid var(--color-border)",
+              }),
             }}
           >
             <span style={{
@@ -840,7 +830,7 @@ function EntryModal({ tx, selectedMonth, monthBalance, totalUSD: currentTotal, c
           />
         </div>
 
-        {/* Category picker */}
+        {/* Category picker — horizontal 1×6 row */}
         <div style={{ display: "grid", gridTemplateColumns: "repeat(6, 1fr)", gap: 8, marginBottom: 16 }}>
           {CATEGORIES.map((c) => {
             const active = cat === c.id;
@@ -849,81 +839,76 @@ function EntryModal({ tx, selectedMonth, monthBalance, totalUSD: currentTotal, c
                 style={{
                   display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
                   padding: "10px 2px 8px", borderRadius: 12, gap: 4,
-                  border:     active ? `2px solid ${c.color}` : "2px solid transparent",
+                  border:     active ? `2px solid ${c.color}` : "1.5px solid var(--color-border)",
                   background: active ? `${c.color}18` : "var(--color-bg-input)",
                   cursor: "pointer", transition: "all 0.15s", minHeight: 60,
                 }}>
                 <c.Icon className="icon-cat" color={active ? c.color : "var(--color-text-lo)"} strokeWidth={1.8} />
-                <span style={{ fontSize: 10, color: active ? c.color : "var(--color-text-lo)", fontWeight: 700, fontFamily: "var(--font-body)", letterSpacing: "0.05em" }}>
-                  {c.label.toUpperCase()}
+                <span style={{ fontSize: 10, color: active ? c.color : "var(--color-text-lo)", fontWeight: active ? 600 : 400, fontFamily: "var(--font-body)" }}>
+                  {c.label}
                 </span>
               </button>
             );
           })}
         </div>
 
-        {/* MO2 — Discard unsaved changes overlay */}
-        {showDiscard && (
-          <div style={{ position: "absolute", inset: 0, background: "rgba(5,7,12,0.94)", borderRadius: 20, zIndex: 10, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: 28, gap: 8 }}>
-            <div style={{ fontSize: 16, fontWeight: 700, color: "var(--color-text-hi)", fontFamily: "var(--font-headline)", textAlign: "center", marginBottom: 4 }}>Discard changes?</div>
-            <div style={{ fontSize: 13, color: "var(--color-text-lo)", fontFamily: "var(--font-body)", textAlign: "center", marginBottom: 12 }}>Your unsaved entry will be lost.</div>
-            <div style={{ display: "flex", gap: 10, width: "100%" }}>
-              <button onClick={() => setShowDiscard(false)} style={{ flex: 1, padding: "12px 0", borderRadius: 12, border: "1px solid var(--color-border-mid)", background: "var(--color-bg-nav)", color: "var(--color-text-lo)", fontSize: 15, fontWeight: 600, fontFamily: "var(--font-body)", cursor: "pointer" }}>Keep editing</button>
-              <button onClick={onClose} style={{ flex: 1, padding: "12px 0", borderRadius: 12, border: "none", background: "#ef4444", color: "#fff", fontSize: 15, fontWeight: 700, fontFamily: "var(--font-body)", cursor: "pointer" }}>Discard</button>
-            </div>
-          </div>
-        )}
-
-        {/* Actions */}
+        {/* Primary action */}
         <div style={{ display: "flex", gap: 8 }}>
-          {isEdit && !deleteConfirm && (
-            <button aria-label="Delete expense" onClick={() => setDeleteConfirm(true)}
-              style={{ padding: 14, borderRadius: 14, border: "1px solid #ef444440", background: "#ef444412", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", minWidth: 48 }}>
-              <Trash2 size={16} color="#ef4444" strokeWidth={2} />
-            </button>
-          )}
-          {deleteConfirm && (
-            <button onClick={() => { onDelete?.(tx!.id); onClose(); }}
-              style={{ flex: 1, padding: 14, borderRadius: 14, border: "none", background: "#ef4444", color: "#fff", cursor: "pointer", fontSize: 16, fontWeight: 700, fontFamily: "var(--font-body)" }}>
-              Confirm delete
-            </button>
-          )}
-          {!deleteConfirm && (
-            <button onClick={handleSave}
-              disabled={parsedAmt <= 0}
-              style={{
-                flex: 1, padding: 14, borderRadius: 14,
-                background: parsedAmt <= 0
-                  ? "var(--color-border-mid)"
-                  : wouldExceed && constraintMode === "soft"
-                  ? "linear-gradient(135deg, #ef4444, #dc2626)"
-                  : wouldExceed && constraintMode === "hard"
-                  ? "transparent"
-                  : "linear-gradient(135deg, var(--accent), var(--accent-dim))",
-                border: wouldExceed && constraintMode === "hard" ? "1.5px solid #f59e0b60" : "none",
-                color: parsedAmt <= 0
-                  ? "var(--color-text-lo)"
-                  : wouldExceed && constraintMode === "hard" ? "#f59e0b" : "var(--accent-text)",
-                fontWeight: 700, fontSize: 16, fontFamily: "var(--font-body)",
-                cursor: parsedAmt <= 0 ? "not-allowed" : "pointer",
-                opacity: parsedAmt <= 0 ? 0.6 : 1,
-                boxShadow: parsedAmt <= 0 || wouldExceed ? "none" : "0 3px 16px var(--accent-glow)",
-                transition: "all 0.2s",
-              }}>
-              {parsedAmt <= 0
-                ? (isEdit ? "Save Changes" : "Add Expense")
-                : wouldExceed && constraintMode === "hard"
-                ? "Over budget — confirm?"
-                : isEdit ? "Save Changes" : "Add Expense"}
-            </button>
-          )}
-          {deleteConfirm && (
-            <button onClick={() => setDeleteConfirm(false)}
-              style={{ padding: "14px 16px", borderRadius: 14, border: "1px solid var(--color-border-mid)", background: "var(--color-bg-nav)", color: "var(--color-text-lo)", cursor: "pointer", fontSize: 14, fontFamily: "var(--font-body)" }}>
-              Cancel
-            </button>
-          )}
+          <button onClick={handleSave}
+            disabled={parsedAmt <= 0}
+            className="btn-primary"
+            style={{
+              flex: 1, padding: 14,
+              ...(parsedAmt <= 0 ? {
+                background: "var(--color-bg-nav)",
+                color: "var(--color-text-lo)",
+                border: "1px solid var(--color-border-mid)",
+                opacity: 0.55,
+                cursor: "not-allowed",
+              } : wouldExceed && constraintMode === "soft" ? {
+                background: "linear-gradient(135deg, #ef4444, #dc2626)",
+              } : wouldExceed && constraintMode === "hard" ? {
+                background: "transparent",
+                border: "1.5px solid #f59e0b60",
+                color: "#f59e0b",
+              } : {}),
+              fontSize: 16, fontFamily: "var(--font-body)",
+              boxShadow: parsedAmt <= 0 || wouldExceed ? "none" : "0 3px 16px var(--accent-glow)",
+              transition: "all 0.2s",
+            }}>
+            {parsedAmt <= 0
+              ? (isEdit ? "Save Changes" : "Add Expense")
+              : wouldExceed && constraintMode === "hard"
+              ? "Over budget — confirm?"
+              : isEdit ? "Save Changes" : "Add Expense"}
+          </button>
         </div>
+
+        {/* Delete — separated by hairline, routes to confirm sheet */}
+        {isEdit && (
+          <>
+            <div style={{ height: "0.5px", background: "var(--color-border)", margin: "16px 0 0" }} />
+            <button
+              onClick={() => { onClose(); onRequestDelete?.(tx!); }}
+              aria-label="Delete this expense"
+              style={{
+                display: "flex", alignItems: "center", justifyContent: "center",
+                gap: 6, width: "100%",
+                background: "none", border: "none", cursor: "pointer",
+                fontSize: 13, fontWeight: 500,
+                color: "var(--color-text-lo)",
+                fontFamily: "var(--font-body)",
+                padding: "14px 0 4px",
+                transition: "color 0.15s",
+              }}
+              onMouseEnter={(e) => { e.currentTarget.style.color = "#ef4444"; }}
+              onMouseLeave={(e) => { e.currentTarget.style.color = "var(--color-text-lo)"; }}
+            >
+              <Trash2 size={13} strokeWidth={2} style={{ flexShrink: 0 }} />
+              Delete expense
+            </button>
+          </>
+        )}
       </motion.div>
 
       {/* C3 — Hard mode: over-budget confirmation overlay */}
@@ -956,12 +941,12 @@ function EntryModal({ tx, selectedMonth, monthBalance, totalUSD: currentTotal, c
                 </div>
               </div>
               <div style={{ display: "flex", gap: 10, marginTop: 24 }}>
-                <button onClick={() => setShowHardConfirm(false)}
-                  style={{ flex: 1, padding: "12px 0", borderRadius: 12, border: "1px solid var(--color-border-mid)", background: "var(--color-bg-nav)", color: "var(--color-text-lo)", fontSize: 14, fontWeight: 600, fontFamily: "var(--font-body)", cursor: "pointer" }}>
+                <button onClick={() => setShowHardConfirm(false)} className="btn-ghost"
+                  style={{ flex: 1, padding: "12px 0", fontSize: 14, fontFamily: "var(--font-body)" }}>
                   Cancel
                 </button>
                 <button onClick={() => { setShowHardConfirm(false); commitSave(); }}
-                  style={{ flex: 1, padding: "12px 0", borderRadius: 12, border: "none", background: "#ef4444", color: "#fff", fontSize: 14, fontWeight: 700, fontFamily: "var(--font-body)", cursor: "pointer" }}>
+                  style={{ flex: 1, padding: "12px 0", borderRadius: 14, border: "none", background: "#ef4444", color: "#fff", fontSize: 14, fontWeight: 700, fontFamily: "var(--font-body)", cursor: "pointer" }}>
                   Add anyway
                 </button>
               </div>
@@ -1005,6 +990,7 @@ export default function ApsaraSpendPage() {
   const [showSettings,     setShowSettings]     = useState(false);
   const [resetConfirm,     setResetConfirm]     = useState(false);
   const [toast,            setToast]            = useState<Toast | null>(null);
+  const [toastProgress,    setToastProgress]    = useState(100); // countdown bar 100→0%
   // L1 — category filter for the Entries list; resets whenever the month changes
   const [filterCategory,   setFilterCategory]   = useState<CategoryId | "all">("all");
   const [showFilterMenu,   setShowFilterMenu]   = useState(false);
@@ -1059,9 +1045,20 @@ export default function ApsaraSpendPage() {
   // B2 — track which tier alerts have already fired this session to avoid repeats
   const firedTiers = useRef<Set<number>>(new Set());
 
-  const showToast = useCallback((msg: string, type: Toast["type"] = "info") => {
-    setToast({ msg, type });
-    setTimeout(() => setToast(null), 3500);
+  const showToast = useCallback((msg: string, type: Toast["type"] = "info", undoFn?: () => void) => {
+    const duration = undoFn ? 5000 : 3500;
+    setToast({ msg, type, undoFn });
+    setToastProgress(100);
+    // Animate countdown bar from 100→0 over the toast duration
+    const start = performance.now();
+    const tick = () => {
+      const elapsed = performance.now() - start;
+      const pct = Math.max(0, 100 - (elapsed / duration) * 100);
+      setToastProgress(pct);
+      if (pct > 0) requestAnimationFrame(tick);
+    };
+    requestAnimationFrame(tick);
+    setTimeout(() => setToast(null), duration);
   }, []);
 
   useEffect(() => {
@@ -1352,12 +1349,22 @@ export default function ApsaraSpendPage() {
   };
 
   const handleDelete = (id: string) => {
+    // Find the tx before removing so we can restore it on Undo
+    const deleted = data.transactions.find((t) => t.id === id);
     setShowModal(false);
     setEditTx(null);
     setConfirmDeleteTx(null);
     setOpenSwipeId(null);
     setData((d) => ({ ...d, transactions: d.transactions.filter((t) => t.id !== id) }));
-    showToast("Expense removed.", "warn");
+    const label = deleted?.note || CATEGORIES.find(c => c.id === deleted?.category)?.label || "Expense";
+    showToast(`${label} deleted.`, "warn", deleted ? () => {
+      setData((d) => {
+        const already = d.transactions.some((t) => t.id === deleted.id);
+        if (already) return d;
+        return { ...d, transactions: [deleted, ...d.transactions] };
+      });
+      showToast("Expense restored.", "success");
+    } : undefined);
   };
 
   const handleResetMonth = () => {
@@ -1424,8 +1431,8 @@ export default function ApsaraSpendPage() {
       <div style={{ padding: "24px 20px 20px" }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", marginBottom: 16 }}>
           <div>
-            <div style={{ fontSize: 11, color: "var(--color-text-lo)", letterSpacing: "0.10em", textTransform: "uppercase", marginBottom: 6, fontFamily: "var(--font-body)", fontWeight: 500 }}>
-              Total Spent
+            <div style={{ fontSize: 12, color: "var(--color-text-lo)", marginBottom: 4, fontFamily: "var(--font-body)", fontWeight: 400 }}>
+              Total spent
             </div>
             <AnimatePresence mode="wait">
               <motion.div key={currency}
@@ -1437,11 +1444,6 @@ export default function ApsaraSpendPage() {
                   : `$${totalUSD.toFixed(2)}`}
               </motion.div>
             </AnimatePresence>
-            {/* N3 — period label */}
-            <div style={{ fontSize: 11, color: "var(--color-text-lo)", marginTop: 6, fontFamily: "var(--font-body)", letterSpacing: "0.04em" }}>
-              {MONTH_FULL[month - 1]} {year}
-            </div>
-
             {/* F2 — Remaining / Over by: live balance feedback below the total */}
             {monthBalance > 0 && (() => {
               const remaining = pin2(monthBalance - totalUSD);
@@ -1494,10 +1496,7 @@ export default function ApsaraSpendPage() {
       {hasBreakdown && (
         <>
           <div style={{ height: 1, background: "var(--color-border)", margin: "0 24px" }} />
-          <div style={{ padding: "20px 20px 24px" }}>
-            <div style={{ fontSize: 11, color: "var(--color-text-lo)", letterSpacing: "0.14em", textTransform: "uppercase", marginBottom: 16, fontFamily: "var(--font-body)", fontWeight: 600 }}>
-              Breakdown
-            </div>
+          <div style={{ padding: "16px 20px 24px" }}>
             {categoryTotals.filter((c) => c.total > 0).map((c, i) => {
               const pct = totalUSD > 0 ? (c.total / totalUSD) * 100 : 0;
               return (
@@ -1532,8 +1531,6 @@ export default function ApsaraSpendPage() {
   const EmptyState = (
     <div style={{ textAlign: "center", padding: "48px 20px", background: "var(--color-bg-card)", borderRadius: 22, border: "1px solid var(--color-border)", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center" }}>
 
-      {/* Inline SVG — undraw-style empty wallet illustration              */}
-      {/* Colours: amber #fbbf24, slate body #1e2a38, surface #141920      */}
       <svg
         width="120" height="80"
         viewBox="0 0 120 80"
@@ -1542,31 +1539,22 @@ export default function ApsaraSpendPage() {
         aria-hidden="true"
         style={{ marginBottom: 16 }}
       >
-        {/* Wallet body */}
         <rect x="8" y="28" width="88" height="44" rx="8" fill="var(--color-bg-nav)" />
-        {/* Wallet flap */}
         <path d="M8 36 Q8 28 16 28 H80 Q88 28 88 36 V44 H8 Z" fill="var(--color-bg-nav)" />
-        {/* Flap fold line */}
-        <line x1="8" y1="44" x2="88" y2="44" stroke="#2d3f55" strokeWidth="1" />
-        {/* Card slot inside wallet */}
-        <rect x="16" y="50" width="40" height="14" rx="3" fill="var(--color-bg-nav)" stroke="#2d3f55" strokeWidth="1" />
-        {/* Card shine */}
-        <rect x="20" y="54" width="12" height="2" rx="1" fill="#2d3f55" />
-        {/* Amber coin — hovering above wallet, signalling emptiness */}
-        <circle cx="90" cy="22" r="14" fill="#fbbf2420" stroke="var(--accent)" strokeWidth="1.5" />
-        {/* Dollar sign in coin */}
+        <line x1="8" y1="44" x2="88" y2="44" stroke="var(--color-border-mid)" strokeWidth="1" />
+        <rect x="16" y="50" width="40" height="14" rx="3" fill="var(--color-bg-nav)" stroke="var(--color-border-mid)" strokeWidth="1" />
+        <rect x="20" y="54" width="12" height="2" rx="1" fill="var(--color-border-mid)" />
+        <circle cx="90" cy="22" r="14" fill="var(--accent-muted)" stroke="var(--accent)" strokeWidth="1.5" />
         <text x="90" y="27" textAnchor="middle" fill="var(--accent)" fontSize="12" fontWeight="700" fontFamily="system-ui">$</text>
-        {/* Small sparkle dots — top right */}
-        <circle cx="108" cy="10" r="2" fill="var(--accent-border)" />
+        <circle cx="108" cy="10" r="2"   fill="var(--accent-border)" />
         <circle cx="114" cy="18" r="1.5" fill="var(--accent-border)" />
         <circle cx="104" cy="4"  r="1"   fill="var(--accent-border)" />
-        {/* Dashed lines inside wallet — indicating no bills */}
-        <line x1="62" y1="54" x2="78" y2="54" stroke="#2d3f55" strokeWidth="1.5" strokeLinecap="round" strokeDasharray="3 2" />
-        <line x1="62" y1="58" x2="74" y2="58" stroke="#2d3f55" strokeWidth="1.5" strokeLinecap="round" strokeDasharray="3 2" />
+        <line x1="62" y1="54" x2="78" y2="54" stroke="var(--color-border-mid)" strokeWidth="1.5" strokeLinecap="round" strokeDasharray="3 2" />
+        <line x1="62" y1="58" x2="74" y2="58" stroke="var(--color-border-mid)" strokeWidth="1.5" strokeLinecap="round" strokeDasharray="3 2" />
       </svg>
 
-      <div style={{ fontSize: 16, fontWeight: 600, color: "var(--color-text-lo)", fontFamily: "var(--font-body)", lineHeight: 1.4 }}>No expenses yet for {MONTH_FULL[month - 1]}</div>
-      <div style={{ fontSize: 12, marginTop: 6, color: "var(--color-text-ghost)", fontFamily: "var(--font-body)", lineHeight: 1.5 }}>Tap + Add Expense to get started</div>
+      <div style={{ fontSize: 16, fontWeight: 600, color: "var(--color-text-lo)", fontFamily: "var(--font-body)", lineHeight: 1.4 }}>Nothing here yet</div>
+      <div style={{ fontSize: 12, marginTop: 6, color: "var(--color-text-ghost)", fontFamily: "var(--font-body)", lineHeight: 1.5 }}>Add your first expense to start tracking.</div>
     </div>
   );
 
@@ -1582,23 +1570,16 @@ export default function ApsaraSpendPage() {
   const TransactionList = hasData ? (
     <div style={{ background: "var(--color-bg-card)", borderRadius: 22, padding: "24px 20px", border: "1px solid var(--color-border)", display: "flex", flexDirection: "column" }}>
 
-      {/* ── Header row: count label + category filter dropdown ── */}
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}>
-        <div style={{ fontSize: 11, color: "var(--color-text-lo)", letterSpacing: "0.14em", textTransform: "uppercase", fontFamily: "var(--font-body)", fontWeight: 600 }}>
-          {filterCategory === "all"
-            ? `${monthTxs.length} ${monthTxs.length === 1 ? "entry" : "entries"}`
-            : `${filteredTxs.length} of ${monthTxs.length}`}
-        </div>
-
-        {/* ── Filter button ── */}
+      {/* ── Filter row — right-aligned, no redundant count label ── */}
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", marginBottom: 16 }}>
         <div style={{ position: "relative" }}>
           <button
             aria-label="Filter by category"
             onClick={() => setShowFilterMenu((v) => !v)}
             style={{
               display: "flex", alignItems: "center", gap: 6,
-              background: filterCategory !== "all" ? `${activeCat?.color}18` : "var(--color-bg-nav)",
-              border: filterCategory !== "all" ? `1px solid ${activeCat?.color}40` : "1px solid var(--color-border-mid)",
+              background: filterCategory !== "all" ? "var(--color-bg-deep)" : "var(--color-bg-nav)",
+              border: filterCategory !== "all" ? "1px solid var(--color-border-mid)" : "1px solid var(--color-border-mid)",
               borderRadius: 8, padding: "5px 10px",
               cursor: "pointer", transition: "all 0.15s",
             }}
@@ -1606,16 +1587,16 @@ export default function ApsaraSpendPage() {
             {filterCategory !== "all" && activeCat && (
               <activeCat.Icon
                 size={12}
-                color={activeCat.color}
+                color="var(--color-text-hi)"
                 strokeWidth={2}
               />
             )}
-            <span style={{ fontSize: 11, fontWeight: 600, color: filterCategory !== "all" ? activeCat?.color : "var(--color-text-lo)", fontFamily: "var(--font-body)", letterSpacing: "0.04em" }}>
+            <span style={{ fontSize: 11, fontWeight: 600, color: "var(--color-text-hi)", fontFamily: "var(--font-body)", letterSpacing: "0.04em" }}>
               {filterCategory === "all" ? "All" : activeCat?.label}
             </span>
             <ChevronDown
               size={11}
-              color={filterCategory !== "all" ? activeCat?.color : "var(--color-text-lo)"}
+              color="var(--color-text-lo)"
               strokeWidth={2.5}
               style={{ transition: "transform 0.15s", transform: showFilterMenu ? "rotate(180deg)" : "rotate(0deg)" }}
             />
@@ -1712,28 +1693,15 @@ export default function ApsaraSpendPage() {
             return (
               <React.Fragment key={tx.id}>
               {isFirst && (
-                <div style={{ fontSize: 11, fontWeight: 600, color: "var(--color-text-lo)", fontFamily: "var(--font-body)", letterSpacing: "0.08em", textTransform: "uppercase", padding: i === 0 ? "2px 0 6px" : "14px 0 6px" }}>
+                <div style={{ fontSize: 11, fontWeight: 500, color: "var(--color-text-lo)", fontFamily: "var(--font-body)", padding: i === 0 ? "2px 0 6px" : "14px 0 6px" }}>
                   {dateLabel(txDate)}
                 </div>
               )}
               <div style={{ position: "relative", overflow: "hidden",
                 borderBottom: isLast ? "none" : "1px solid var(--color-border)" }}>
 
-                {/* S1 — Two-button reveal zone: EDIT (left) | DELETE (right) */}
-                <div style={{ position: "absolute", right: 0, top: 0, bottom: 0, width: 160, display: "flex" }}>
-                  {/* EDIT action */}
-                  <button
-                    onClick={() => { setEditTx(tx); setShowModal(true); setOpenSwipeId(null); }}
-                    style={{
-                      flex: 1, border: "none", cursor: "pointer",
-                      background: "var(--color-bg-nav)",
-                      display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 4,
-                      borderRight: "1px solid var(--color-border)",
-                    }}>
-                    <Pencil size={16} color="var(--color-text-hi)" strokeWidth={2} />
-                    <span style={{ fontSize: 10, fontWeight: 600, color: "var(--color-text-hi)", fontFamily: "var(--font-body)", letterSpacing: "0.04em" }}>EDIT</span>
-                  </button>
-                  {/* DELETE action */}
+                {/* Swipe reveal — DELETE only (full width). Row tap = edit. */}
+                <div style={{ position: "absolute", right: 0, top: 0, bottom: 0, width: 80, display: "flex" }}>
                   <button
                     onClick={() => { setConfirmDeleteTx(tx); setOpenSwipeId(null); }}
                     style={{
@@ -1746,13 +1714,13 @@ export default function ApsaraSpendPage() {
                   </button>
                 </div>
 
-                {/* Draggable row — S1: constraint -160 to reveal both buttons */}
+                {/* Draggable row — constraint -80 matches the 80px DELETE reveal */}
                 <motion.div
                   drag="x"
                   dragDirectionLock
-                  dragConstraints={{ left: -160, right: 0 }}
+                  dragConstraints={{ left: -80, right: 0 }}
                   dragElastic={{ left: 0.06, right: 0 }}
-                  animate={{ x: isOpen ? -160 : 0 }}
+                  animate={{ x: isOpen ? -80 : 0 }}
                   transition={{ type: "spring", damping: 30, stiffness: 300 }}
                   onDragStart={() => { dragStarted.current = true; }}
                   onDragEnd={(_e, info) => {
@@ -1838,11 +1806,9 @@ export default function ApsaraSpendPage() {
         display: "flex", flexDirection: "column", alignItems: "center",
         justifyContent: "center", textAlign: "center",
         padding: "48px 32px",
-        // Removed min-height:100dvh — let content be natural height
-        // Body scroll lock already prevents rubber-band scroll when no budget set
       }}
     >
-      {/* Wallet illustration (reused from EmptyState) */}
+      {/* Wallet illustration */}
       <svg width="140" height="96" viewBox="0 0 120 80" fill="none"
         xmlns="http://www.w3.org/2000/svg" aria-hidden="true"
         style={{ marginBottom: 28 }}>
@@ -1860,36 +1826,27 @@ export default function ApsaraSpendPage() {
         <line x1="62" y1="58" x2="74" y2="58" stroke="var(--color-border)" strokeWidth="1.5" strokeLinecap="round" strokeDasharray="3 2" />
       </svg>
 
-      {/* Headline */}
       <div style={{ fontSize: 24, fontWeight: 700, color: "var(--color-text-hi)", fontFamily: "var(--font-headline)", letterSpacing: "-0.01em", lineHeight: 1.25, marginBottom: 10 }}>
-        Set your {MONTH_FULL[month - 1]} budget<br />to get started
+        What's your {MONTH_FULL[month - 1]} budget?
       </div>
-      {/* Sub-label */}
       <div style={{ fontSize: 14, color: "var(--color-text-lo)", fontFamily: "var(--font-body)", lineHeight: 1.6, marginBottom: 32, maxWidth: 280 }}>
-        Set a starting budget for {MONTH_FULL[month - 1]} — you can always adjust it later.
+        You can always adjust it later.
       </div>
 
-      {/* CTA */}
       <motion.button
         whileTap={{ scale: 0.97 }}
         onClick={() => setShowBudgetModal(true)}
+        className="btn-primary"
         style={{
-          background: `linear-gradient(135deg, var(--accent) 0%, var(--accent-dim) 100%)`,
-          color: "var(--accent-text)",
-          border: "none", borderRadius: 16,
-          padding: "16px 32px",
-          fontSize: 16, fontWeight: 700, fontFamily: "var(--font-headline)",
-          cursor: "pointer", letterSpacing: "0.02em",
+          padding: "15px 32px",
+          fontSize: 16, fontFamily: "var(--font-headline)",
+          letterSpacing: "0.02em",
           display: "flex", alignItems: "center", gap: 8,
         }}
       >
-        + Add Budget Balance
+        Set budget
       </motion.button>
 
-      {/* Period label */}
-      <div style={{ fontSize: 12, color: "var(--color-text-ghost)", fontFamily: "var(--font-body)", marginTop: 20, letterSpacing: "0.06em" }}>
-        {MONTH_FULL[month - 1].toUpperCase()} {year}
-      </div>
     </motion.div>
   );
 
@@ -2004,6 +1961,29 @@ export default function ApsaraSpendPage() {
         .text-lo   { color: var(--color-text-lo)    !important; }
 
         /* Focus ring uses accent var */
+        /* ── Unified input system ────────────────────────────────────────── */
+        /* All text/number/date inputs share the same default + focus states   */
+        /* Default:  1.5px var(--color-border), bg: var(--color-bg-input)      */
+        /* Focus:    accent border + 3px accent-muted ring                      */
+        /* Disabled: opacity 0.45, cursor not-allowed                           */
+        .input-field {
+          background: var(--color-bg-input);
+          border: 1.5px solid var(--color-border);
+          border-radius: 12px;
+          color: var(--color-text-hi);
+          outline: none;
+          transition: border-color 0.18s, box-shadow 0.18s;
+        }
+        .input-field:focus {
+          border-color: var(--accent);
+          box-shadow: 0 0 0 3px var(--accent-muted);
+        }
+        .input-field:disabled,
+        .input-field[aria-disabled="true"] {
+          opacity: 0.45;
+          cursor: not-allowed;
+        }
+
         /* Input field — shared style for default + focus states              */
         /* Default: subtle border. Focus: accent border + faint glow ring.    */
         .focus-input {
@@ -2015,6 +1995,40 @@ export default function ApsaraSpendPage() {
           box-shadow: 0 0 0 3px var(--accent-muted) !important;
           outline: none !important;
         }
+
+        /* ── Unified button system ───────────────────────────────────────── */
+        /* Primary: accent gradient, 14px radius, 14–16px padding             */
+        /* Secondary/ghost: bg-nav, border, text-lo                           */
+        /* Disabled: bg-nav, border-mid, text-lo, opacity 0.5, not-allowed    */
+        .btn-primary {
+          background: linear-gradient(135deg, var(--accent) 0%, var(--accent-dim) 100%);
+          color: var(--accent-text);
+          border: none;
+          border-radius: 14px;
+          font-weight: 700;
+          cursor: pointer;
+          transition: opacity 0.2s, box-shadow 0.2s;
+        }
+        .btn-primary:hover   { opacity: 0.92; }
+        .btn-primary:active  { opacity: 0.85; }
+        .btn-primary:disabled,
+        .btn-primary[aria-disabled="true"] {
+          background: var(--color-bg-nav);
+          color: var(--color-text-lo);
+          border: 1px solid var(--color-border-mid);
+          opacity: 0.6;
+          cursor: not-allowed;
+        }
+        .btn-ghost {
+          background: var(--color-bg-nav);
+          color: var(--color-text-lo);
+          border: 1px solid var(--color-border-mid);
+          border-radius: 14px;
+          font-weight: 600;
+          cursor: pointer;
+          transition: background 0.15s;
+        }
+        .btn-ghost:hover { background: var(--color-border-mid); }
 
         /* HD3 — Focus ring: 3px offset + 2px width ensures ≥3:1 contrast in light mode */
         button:focus { outline: none; }
@@ -2305,7 +2319,8 @@ export default function ApsaraSpendPage() {
                   <button onClick={dismiss} style={{ padding: "11px 0", borderRadius: 12, border: "1px solid var(--color-border-mid)", background: "transparent", color: "var(--color-text-lo)", fontSize: 14, fontFamily: "var(--font-body)", cursor: "pointer", flex: 1 }}>Skip</button>
                   <button
                     onClick={() => isLast ? dismiss() : setOnboardStep((s) => s + 1)}
-                    style={{ padding: "11px 0", borderRadius: 12, border: "none", background: "linear-gradient(135deg, var(--accent), var(--accent-dim))", color: "var(--accent-text)", fontSize: 14, fontWeight: 700, fontFamily: "var(--font-body)", cursor: "pointer", flex: 2 }}>
+                    className="btn-primary"
+                    style={{ padding: "11px 0", fontSize: 14, fontFamily: "var(--font-body)", flex: 2 }}>
                     {isLast ? "Get started" : "Next →"}
                   </button>
                 </div>
@@ -2325,13 +2340,6 @@ export default function ApsaraSpendPage() {
           userSelect: "none",
         }}
       >
-        {/* § 5  Radial gradient depth */}
-        <div style={{
-          position: "fixed", top: -100, left: "50%", transform: "translateX(-50%)",
-          width: 500, height: 500, borderRadius: "50%", pointerEvents: "none", zIndex: 0,
-          background: "radial-gradient(circle, var(--accent-muted) 0%, transparent 68%)",
-        }} />
-
         <div className="main-scroll" style={{ position: "relative", zIndex: 1, paddingBottom: "calc(160px + env(safe-area-inset-bottom))" }}>
 
           {/* ════ STICKY HEADER — app title + month navigation ════ */}
@@ -2366,17 +2374,17 @@ export default function ApsaraSpendPage() {
           {/* J3 — Month nav skeleton while hydrating */}
           {!isLoaded ? (
             <div className="monthnav-pad" style={{ display: "flex", alignItems: "center", gap: 12 }}>
-              <div className="skeleton" style={{ width: 44, height: 44, borderRadius: 10, flexShrink: 0 }} />
+              <div className="skeleton skeleton-circle" style={{ width: 20, height: 20, flexShrink: 0, margin: "12px" }} />
               <div style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", gap: 8 }}>
                 <div className="skeleton skeleton-round" style={{ width: 100, height: 22 }} />
                 <div className="skeleton skeleton-round" style={{ width: 60, height: 12 }} />
               </div>
-              <div className="skeleton" style={{ width: 44, height: 44, borderRadius: 10, flexShrink: 0 }} />
+              <div className="skeleton skeleton-circle" style={{ width: 20, height: 20, flexShrink: 0, margin: "12px" }} />
             </div>
           ) : (
           <div className="monthnav-pad" style={{ display: "flex", alignItems: "center", gap: 12 }}>
             <button aria-label="Previous month" onClick={() => navigateMonth(-1)}
-              style={{ background: "var(--color-bg-nav)", border: "1px solid var(--color-border-mid)", borderRadius: 10, padding: 12, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", minWidth: 44, minHeight: 44 }}>
+              style={{ background: "none", border: "none", borderRadius: 10, padding: 12, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", minWidth: 44, minHeight: 44 }}>
               <ChevronLeft className="icon-nav" color="var(--color-text-lo)" strokeWidth={2} />
             </button>
 
@@ -2406,13 +2414,12 @@ export default function ApsaraSpendPage() {
               aria-description={isCurrentMonth ? "Cannot navigate past current month" : undefined}
               onClick={() => navigateMonth(1)} disabled={isCurrentMonth}
               style={{
-                background: isCurrentMonth ? "transparent" : "var(--color-bg-nav)",
-                border: "1px solid var(--color-border-mid)",
+                background: "none", border: "none",
                 borderRadius: 10, padding: 12,
                 cursor: isCurrentMonth ? "default" : "pointer",
                 display: "flex", alignItems: "center", justifyContent: "center",
                 minWidth: 44, minHeight: 44,
-                opacity: isCurrentMonth ? 0.3 : 1,
+                opacity: isCurrentMonth ? 0.25 : 1,
                 transition: "opacity 0.2s",
               }}>
               <ChevronRight className="icon-nav" color="var(--color-text-lo)" strokeWidth={2} />
@@ -2422,11 +2429,10 @@ export default function ApsaraSpendPage() {
 
           </div>{/* end .sticky-header */}
 
-          {/* ════ SWIPEABLE DASHBOARD ════ */}
-          <motion.div drag="x" dragConstraints={{ left: 0, right: 0 }} dragElastic={0.12}
-            onDragEnd={handleDragEnd}
+          {/* ════ DASHBOARD — month content ════ */}
+          <div
             onClick={() => { showFilterMenu && setShowFilterMenu(false); openSwipeId && setOpenSwipeId(null); }}
-            style={{ cursor: "grab", touchAction: "pan-y" }}>
+            style={{ touchAction: "pan-y" }}>
             <AnimatePresence mode="wait" custom={swipeDir}>
               <motion.div key={selectedMonth} custom={swipeDir} variants={slideVariants}
                 initial="enter" animate="center" exit="exit"
@@ -2514,9 +2520,9 @@ export default function ApsaraSpendPage() {
 
               </motion.div>
             </AnimatePresence>
-          </motion.div>
+          </div>
 
-          {showSwipeHint && (
+          {showSwipeHint && hasData && (
           <div className="swipe-hint" style={{ textAlign: "center", marginTop: 14, fontSize: 11, color: "var(--color-text-ghost)", letterSpacing: "0.1em", fontFamily: "var(--font-body)" }}>
             ← SWIPE TO NAVIGATE MONTHS →
           </div>
@@ -2549,7 +2555,6 @@ export default function ApsaraSpendPage() {
             borderRadius: 16,
             padding: "14px 22px",
             cursor: fabDisabled ? "not-allowed" : "pointer",
-            zIndex: 50,
             display: "flex", alignItems: "center", justifyContent: "center",
             gap: 8, letterSpacing: "0.03em",
             fontFamily: "var(--font-headline)",
@@ -2577,58 +2582,84 @@ export default function ApsaraSpendPage() {
         {/* ════ MODALS ════ */}
         <AnimatePresence>
 
-          {/* ── Swipe-delete confirmation — Telegram action sheet style ── */}
-          {confirmDeleteTx && (
+          {/* ── Delete confirmation — action sheet ── */}
+          {confirmDeleteTx && (() => {
+            const cat = CATEGORIES.find(c => c.id === confirmDeleteTx.category);
+            return (
             <motion.div
               initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-              style={{ position: "fixed", inset: 0, background: "rgba(5,7,12,0.72)", zIndex: 260, display: "flex", flexDirection: "column", justifyContent: "flex-end", padding: "0 12px calc(12px + env(safe-area-inset-bottom))" }}
+              style={{ position: "fixed", inset: 0, background: "rgba(5,7,12,0.78)", zIndex: 260, display: "flex", flexDirection: "column", justifyContent: "flex-end", padding: "0 12px calc(12px + env(safe-area-inset-bottom))" }}
               onClick={() => { setConfirmDeleteTx(null); setOpenSwipeId(null); }}>
 
-              {/* Card 1 — item preview + destructive actions */}
+              {/* Card 1 — preview + actions */}
               <motion.div
-                initial={{ y: 40, opacity: 0 }} animate={{ y: 0, opacity: 1 }}
-                exit={{ y: 40, opacity: 0 }}
-                transition={{ type: "spring", damping: 32, stiffness: 340 }}
-                role="alertdialog" aria-modal="true" aria-label="Delete expense"
-                style={{ background: "var(--color-bg-card)", borderRadius: 16, overflow: "hidden", marginBottom: 10, border: "1px solid var(--color-border-mid)" }}
+                initial={{ y: 44, opacity: 0 }} animate={{ y: 0, opacity: 1 }}
+                exit={{ y: 44, opacity: 0 }}
+                transition={{ type: "spring", damping: 30, stiffness: 320 }}
+                role="alertdialog" aria-modal="true" aria-label="Confirm delete expense"
+                style={{ background: "var(--color-bg-card)", borderRadius: 20, overflow: "hidden", marginBottom: 10, border: "1px solid var(--color-border-mid)" }}
                 onClick={(e) => e.stopPropagation()}>
 
-                {/* Item preview header */}
-                <div style={{ padding: "16px 20px 14px", borderBottom: "0.5px solid var(--color-border)", textAlign: "center" }}>
-                  <div style={{ fontSize: 13, color: "var(--color-text-lo)", fontFamily: "var(--font-body)", marginBottom: 4 }}>
-                    Remove this expense?
+                {/* Item preview */}
+                <div style={{ padding: "24px 20px 20px", borderBottom: "0.5px solid var(--color-border)", textAlign: "center" }}>
+                  {/* Category icon */}
+                  <div style={{ display: "flex", justifyContent: "center", marginBottom: 14 }}>
+                    <div style={{ width: 48, height: 48, borderRadius: 14, background: `${cat?.color}18`, border: `1px solid ${cat?.color}40`, display: "flex", alignItems: "center", justifyContent: "center" }}>
+                      {cat && <cat.Icon size={22} color={cat.color} strokeWidth={1.8} />}
+                    </div>
                   </div>
-                  <div style={{ fontSize: 15, fontWeight: 600, color: "var(--color-text-hi)", fontFamily: "var(--font-headline)" }}>
-                    {confirmDeleteTx.note || CATEGORIES.find(c => c.id === confirmDeleteTx.category)?.label}
+                  {/* Amount — prominent */}
+                  <div style={{ fontSize: 30, fontWeight: 800, color: "var(--color-text-hi)", fontFamily: "var(--font-mono)", marginBottom: 4, letterSpacing: "-0.02em" }}>
+                    {fmt(confirmDeleteTx.amountUSD)}
                   </div>
-                  <div style={{ fontSize: 12, color: "var(--color-text-lo)", fontFamily: "var(--font-mono)", marginTop: 3 }}>
-                    {fmt(confirmDeleteTx.amountUSD)} · {formatDisplayDate(localDateString(new Date(confirmDeleteTx.date)))}
+                  {/* Note */}
+                  {confirmDeleteTx.note && (
+                    <div style={{ fontSize: 14, fontWeight: 600, color: "var(--color-text-mid)", fontFamily: "var(--font-body)", marginBottom: 3 }}>
+                      {confirmDeleteTx.note}
+                    </div>
+                  )}
+                  <div style={{ fontSize: 12, color: "var(--color-text-lo)", fontFamily: "var(--font-body)", marginBottom: 14 }}>
+                    {cat?.label} · {formatDisplayDate(localDateString(new Date(confirmDeleteTx.date)))}
+                  </div>
+                  {/* Undo callout */}
+                  <div style={{ display: "inline-flex", alignItems: "center", gap: 6, background: "var(--color-bg-page)", border: "1px solid var(--color-border)", borderRadius: 99, padding: "5px 12px" }}>
+                    <div style={{ width: 6, height: 6, borderRadius: "50%", background: "#34d399", flexShrink: 0 }} />
+                    <span style={{ fontSize: 11, color: "var(--color-text-lo)", fontFamily: "var(--font-body)" }}>You can undo this within 5 seconds</span>
                   </div>
                 </div>
 
-                {/* Destructive action — full width, red text */}
-                <button
-                  onClick={() => handleDelete(confirmDeleteTx.id)}
-                  style={{ width: "100%", padding: "16px 20px", background: "transparent", border: "none", cursor: "pointer", fontSize: 16, fontWeight: 600, color: "#ef4444", fontFamily: "var(--font-body)", textAlign: "center" }}>
-                  Delete Expense
-                </button>
+                {/* Split action row */}
+                <div style={{ display: "flex" }}>
+                  <button
+                    onClick={() => { setConfirmDeleteTx(null); setOpenSwipeId(null); }}
+                    style={{ flex: 1, padding: "17px 0", background: "transparent", border: "none", borderRight: "0.5px solid var(--color-border)", cursor: "pointer", fontSize: 16, fontWeight: 600, color: "var(--color-text-hi)", fontFamily: "var(--font-body)", textAlign: "center" }}>
+                    Cancel
+                  </button>
+                  <button
+                    onClick={() => handleDelete(confirmDeleteTx.id)}
+                    style={{ flex: 1, padding: "17px 0", background: "transparent", border: "none", cursor: "pointer", fontSize: 16, fontWeight: 700, color: "#ef4444", fontFamily: "var(--font-body)", textAlign: "center" }}>
+                    Delete
+                  </button>
+                </div>
               </motion.div>
 
-              {/* Card 2 — Cancel (separate card, blue text like Telegram) */}
+              {/* Cancel pill */}
               <motion.div
-                initial={{ y: 40, opacity: 0 }} animate={{ y: 0, opacity: 1 }}
-                exit={{ y: 40, opacity: 0 }}
-                transition={{ type: "spring", damping: 32, stiffness: 340, delay: 0.03 }}
+                initial={{ y: 44, opacity: 0 }} animate={{ y: 0, opacity: 1 }}
+                exit={{ y: 44, opacity: 0 }}
+                transition={{ type: "spring", damping: 32, stiffness: 320, delay: 0.04 }}
                 style={{ background: "var(--color-bg-card)", borderRadius: 16, overflow: "hidden", border: "1px solid var(--color-border-mid)" }}
-                onClick={(e) => e.stopPropagation()}>
+                onClick={(e) => e.stopPropagation()}
+              >
                 <button
                   onClick={() => { setConfirmDeleteTx(null); setOpenSwipeId(null); }}
-                  style={{ width: "100%", padding: "16px 20px", background: "transparent", border: "none", cursor: "pointer", fontSize: 16, fontWeight: 600, color: "var(--accent)", fontFamily: "var(--font-body)", textAlign: "center" }}>
+                  style={{ width: "100%", padding: "16px 0", background: "transparent", border: "none", cursor: "pointer", fontSize: 16, fontWeight: 600, color: "var(--accent)", fontFamily: "var(--font-body)", textAlign: "center" }}>
                   Cancel
                 </button>
               </motion.div>
             </motion.div>
-          )}
+            );
+          })()}
 
           {showPicker && (
             <MonthPicker current={selectedMonth}
@@ -2653,6 +2684,7 @@ export default function ApsaraSpendPage() {
               constraintMode={constraintMode}
               onSave={handleSave}
               onDelete={handleDelete}
+              onRequestDelete={(t) => { setShowModal(false); setEditTx(null); setConfirmDeleteTx(t); }}
               onClose={() => { setShowModal(false); setEditTx(null); }}
             />
           )}
@@ -2702,12 +2734,12 @@ export default function ApsaraSpendPage() {
                     onKeyDown={(e) => e.key === "Enter" && handleSetBudget()}
                     placeholder="0.00"
                     autoFocus
+                    className="input-field"
                     style={{
                       width: "100%", boxSizing: "border-box",
-                      background: "var(--color-bg-input)", border: "2px solid var(--color-border)",
-                      borderRadius: 14, padding: "16px 16px 16px 50px",
-                      fontSize: 32, fontWeight: 800, color: "var(--color-text-hi)", outline: "none",
-                      fontFamily: "var(--font-mono)", transition: "border-color 0.2s",
+                      borderRadius: 12, padding: "16px 16px 16px 50px",
+                      fontSize: 32, fontWeight: 800,
+                      fontFamily: "var(--font-mono)",
                     }}
                   />
                 </div>
@@ -2729,7 +2761,7 @@ export default function ApsaraSpendPage() {
 
                 {/* Confirm button — MO4: nudge animation instead of silent disabled state */}
                 <button
-                  className={budgetShake ? "btn-nudge" : ""}
+                  className={`btn-primary${budgetShake ? " btn-nudge" : ""}`}
                   onClick={() => {
                     if (!budgetInput || parseFloat(budgetInput) <= 0) {
                       setBudgetShake(true);
@@ -2738,14 +2770,16 @@ export default function ApsaraSpendPage() {
                     }
                     handleSetBudget();
                   }}
+                  aria-disabled={!budgetInput || parseFloat(budgetInput) <= 0}
                   style={{
-                    width: "100%", padding: "16px", borderRadius: 16, border: "none",
-                    background: !budgetInput || parseFloat(budgetInput) <= 0
-                      ? "var(--color-border-mid)" : "linear-gradient(135deg, var(--accent) 0%, var(--accent-dim) 100%)",
-                    color: !budgetInput || parseFloat(budgetInput) <= 0 ? "var(--color-text-lo)" : "var(--accent-text)",
-                    fontSize: 16, fontWeight: 700, fontFamily: "var(--font-headline)",
-                    cursor: "pointer",
-                    transition: "background 0.2s, color 0.2s",
+                    width: "100%", padding: "15px", fontSize: 16,
+                    fontFamily: "var(--font-headline)",
+                    ...(!budgetInput || parseFloat(budgetInput) <= 0 ? {
+                      background: "var(--color-bg-nav)",
+                      color: "var(--color-text-lo)",
+                      border: "1px solid var(--color-border-mid)",
+                      opacity: 0.6,
+                    } : {}),
                   }}>
                   {monthBalance > 0 ? "Update Budget" : "Confirm Budget"}
                 </button>
@@ -2783,7 +2817,6 @@ export default function ApsaraSpendPage() {
                 </div>
 
                 {/* ── Q5  Theme Mode ── */}
-                <div style={{ fontSize: 11, color: "var(--color-text-lo)", letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: 8, fontFamily: "var(--font-body)", fontWeight: 600 }}>Appearance</div>
                 <div style={{ background: "var(--color-bg-page)", borderRadius: 14, padding: 16, marginBottom: 16 }}>
                   {/* Theme toggle */}
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
@@ -2865,7 +2898,7 @@ export default function ApsaraSpendPage() {
                 {/* Static rate info */}
                 <div style={{ background: "var(--color-bg-page)", borderRadius: 12, padding: "12px 16px", marginBottom: 16, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                   <div>
-                    <div style={{ fontSize: 11, color: "var(--color-text-lo)", letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: 4, fontFamily: "var(--font-body)", fontWeight: 600 }}>Exchange Rate</div>
+                    <div style={{ fontSize: 12, color: "var(--color-text-lo)", marginBottom: 2, fontFamily: "var(--font-body)" }}>Exchange rate</div>
                     <div style={{ fontSize: 16, fontWeight: 700, color: "var(--color-text-lo)", fontFamily: "var(--font-mono)" }}>1 USD = 4,000 ៛</div>
                   </div>
                   <span style={{ fontSize: 11, background: "var(--color-border-mid)", color: "var(--color-text-lo)", padding: "4px 10px", borderRadius: 99, letterSpacing: "0.06em", fontFamily: "var(--font-body)", fontWeight: 600 }}>Fixed</span>
@@ -2874,7 +2907,6 @@ export default function ApsaraSpendPage() {
                 {/* E1 — Notifications */}
                 {notifPermission !== "unsupported" && (
                   <>
-                    <div style={{ fontSize: 11, color: "var(--color-text-lo)", letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: 8, fontFamily: "var(--font-body)", fontWeight: 600 }}>Notifications</div>
                     <div style={{ background: "var(--color-bg-page)", borderRadius: 14, padding: 16, marginBottom: 16 }}>
                       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
                         <div>
@@ -2910,8 +2942,10 @@ export default function ApsaraSpendPage() {
                   </>
                 )}
 
-                {/* Data Management */}
-                <div style={{ fontSize: 11, color: "var(--color-text-lo)", letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: 8, fontFamily: "var(--font-body)", fontWeight: 600 }}>Data Management</div>
+                {/* Data Management — only shown when this month has data */}
+                {monthTxs.length > 0 && (
+                <>
+                <div style={{ height: 1, background: "var(--color-border)", margin: "0 0 16px" }} />
                 <div style={{ background: "var(--color-bg-page)", borderRadius: 14, padding: 16 }}>
                   {!resetConfirm ? (
                     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
@@ -2932,18 +2966,20 @@ export default function ApsaraSpendPage() {
                         Delete all {MONTH_FULL[month - 1]} {year} entries? This cannot be undone.
                       </div>
                       <div style={{ display: "flex", gap: 8 }}>
-                        <button onClick={() => setResetConfirm(false)}
-                          style={{ flex: 1, padding: 12, background: "var(--color-bg-nav)", border: "1px solid var(--color-border-mid)", color: "var(--color-text-lo)", borderRadius: 10, cursor: "pointer", fontSize: 14, fontWeight: 600, fontFamily: "var(--font-body)" }}>
+                        <button onClick={() => setResetConfirm(false)} className="btn-ghost"
+                          style={{ flex: 1, padding: 12, fontSize: 14, fontFamily: "var(--font-body)" }}>
                           Cancel
                         </button>
                         <button onClick={handleResetMonth}
-                          style={{ flex: 1, padding: 12, background: "#ef4444", border: "none", color: "#fff", borderRadius: 10, cursor: "pointer", fontSize: 14, fontWeight: 700, fontFamily: "var(--font-body)" }}>
+                          style={{ flex: 1, padding: 12, background: "#ef4444", border: "none", color: "#fff", borderRadius: 14, cursor: "pointer", fontSize: 14, fontWeight: 700, fontFamily: "var(--font-body)" }}>
                           Yes, clear
                         </button>
                       </div>
                     </div>
                   )}
                 </div>
+                </>
+                )}{/* end monthTxs.length > 0 */}
               </motion.div>
             </motion.div>
           )}
@@ -2960,15 +2996,48 @@ export default function ApsaraSpendPage() {
               transition={{ duration: 0.22 }}
               style={{
                 position: "fixed", bottom: 100, left: "50%", zIndex: 400,
-                background: toast.type === "warn" ? "#92400e" : toast.type === "success" ? "#064e3b" : "#1e3a5f",
-                color:      toast.type === "warn" ? "#fde68a" : toast.type === "success" ? "#6ee7b7" : "#bfdbfe",
-                border: `1px solid ${toast.type === "warn" ? "#b45309" : toast.type === "success" ? "#047857" : "#1d4ed8"}`,
-                borderRadius: 14, padding: "12px 18px", fontSize: 13, fontWeight: 500,
-                fontFamily: "var(--font-body)", lineHeight: 1.4,
-                maxWidth: "calc(100vw - 48px)", textAlign: "center",
+                background: toast.type === "warn" ? "#1c1008" : toast.type === "success" ? "#051f12" : "#0c1829",
+                border: `1px solid ${toast.type === "warn" ? "#92400e" : toast.type === "success" ? "#047857" : "#1d4ed8"}`,
+                borderRadius: 16, overflow: "hidden",
+                maxWidth: "calc(100vw - 48px)", minWidth: 220,
                 boxShadow: "0 8px 32px rgba(0,0,0,0.6)",
               }}>
-              {toast.msg}
+              {/* Content row */}
+              <div style={{ display: "flex", alignItems: "center", gap: 10, padding: toast.undoFn ? "12px 8px 12px 16px" : "12px 18px" }}>
+                <span style={{
+                  flex: 1, fontSize: 13, fontWeight: 500,
+                  color: toast.type === "warn" ? "#fde68a" : toast.type === "success" ? "#6ee7b7" : "#bfdbfe",
+                  fontFamily: "var(--font-body)", lineHeight: 1.4,
+                }}>
+                  {toast.msg}
+                </span>
+                {toast.undoFn && (
+                  <button
+                    onClick={() => { toast.undoFn?.(); setToast(null); }}
+                    style={{
+                      flexShrink: 0,
+                      background: "#fff",
+                      border: "none", borderRadius: 8,
+                      padding: "7px 16px", cursor: "pointer",
+                      fontSize: 12, fontWeight: 700,
+                      color: "#111",
+                      fontFamily: "var(--font-body)", letterSpacing: "0.02em",
+                    }}>
+                    Undo
+                  </button>
+                )}
+              </div>
+              {/* Countdown progress bar — only on undo toasts */}
+              {toast.undoFn && (
+                <div style={{ height: 2, background: "rgba(255,255,255,0.08)" }}>
+                  <div style={{
+                    height: "100%",
+                    width: `${toastProgress}%`,
+                    background: toast.type === "warn" ? "#f59e0b" : "#34d399",
+                    transition: "width 0.1s linear",
+                  }} />
+                </div>
+              )}
             </motion.div>
           )}
         </AnimatePresence>
