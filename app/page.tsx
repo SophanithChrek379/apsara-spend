@@ -2529,8 +2529,8 @@ export default function ApsaraSpendPage() {
           )}
         </div>
 
-        {/* ════ FAB — Floating Action Button, shown after budget is set ════ */}
-        {hasMonthBudget && (
+        {/* ════ FAB — only after hydration completes to avoid SSR mismatch ════ */}
+        {isLoaded && hasMonthBudget && (
         <div className="fab-footer">
         <motion.button
           whileTap={{ scale: fabDisabled ? 1 : 0.94 }}
