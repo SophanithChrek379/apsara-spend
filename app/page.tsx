@@ -289,7 +289,7 @@ function BudgetBar({ total, monthBudget, onSetBudget, onEditBudget }: {
         aria-valuemin={0}
         aria-valuemax={100}
         aria-valuetext={isOver ? `Over budget by $${overAmt.toFixed(2)}` : `${pctDisplay}% used — ${tierLabel}`}
-        style={{ background: "var(--color-bg-input)", borderRadius: 999, height: 7, overflow: "hidden" }}>
+        style={{ background: "var(--color-bg-nav)", borderRadius: 999, height: 7, overflow: "hidden" }}>
         <motion.div
           animate={{ width: `${pct}%` }}
           transition={{ duration: 0.5, ease: [0.4, 0, 0.2, 1] }}
@@ -499,7 +499,16 @@ function EntryModal({ tx, selectedMonth, monthBalance, totalUSD: currentTotal, c
   const dateInputRef = useRef<HTMLInputElement>(null);
   const modalRef     = useRef<HTMLDivElement>(null);
 
-  useEffect(() => { setTimeout(() => amountRef.current?.focus(), 120); }, []);
+  useEffect(() => {
+    setTimeout(() => {
+      const el = amountRef.current;
+      if (!el) return;
+      el.focus();
+      // Move cursor to end of any pre-filled value
+      const len = el.value.length;
+      el.setSelectionRange(len, len);
+    }, 120);
+  }, []);
   useFocusTrap(modalRef, true);
 
   // Currency switch: convert the current amount to the new currency so the user
@@ -637,7 +646,7 @@ function EntryModal({ tx, selectedMonth, monthBalance, totalUSD: currentTotal, c
         </div>
 
         {/* Currency toggle */}
-        <div style={{ display: "flex", background: "var(--color-bg-input)", borderRadius: 12, padding: 4, marginBottom: 16, gap: 4 }}>
+        <div style={{ display: "flex", background: "var(--color-bg-nav)", borderRadius: 12, padding: 4, marginBottom: 16, gap: 4 }}>
           {(["USD", "KHR"] as Currency[]).map((c) => (
             <button key={c} onClick={() => handleCurrencyChange(c)}
               style={{
@@ -748,6 +757,7 @@ function EntryModal({ tx, selectedMonth, monthBalance, totalUSD: currentTotal, c
           type="text" value={note}
           onChange={(e) => setNote(sanitizeText(e.target.value))}
           onKeyDown={(e) => e.key === "Enter" && handleSave()}
+          onFocus={(e) => { const len = e.target.value.length; e.target.setSelectionRange(len, len); }}
           placeholder="Note (optional, max 100 chars)..."
           maxLength={100}
           className="input-field"
@@ -1029,10 +1039,25 @@ export default function ApsaraSpendPage() {
   const [budgetShake,      setBudgetShake]      = useState(false); // MO4
   // A2 — focus trap refs
   const budgetModalRef   = useRef<HTMLDivElement>(null);
+  const budgetInputRef   = useRef<HTMLInputElement>(null);
   const settingsModalRef = useRef<HTMLDivElement>(null);
 
   // A2 — activate focus trap whenever these modals are open
   useFocusTrap(budgetModalRef,   showBudgetModal);
+
+  // Focus budget input at end of value when modal opens (after spring animation settles)
+  useEffect(() => {
+    if (!showBudgetModal) return;
+    const t = setTimeout(() => {
+      const el = budgetInputRef.current;
+      if (!el) return;
+      el.focus();
+      // Cursor to end of any pre-filled value (e.g. "330" → cursor after 0)
+      const len = el.value.length;
+      el.setSelectionRange(len, len);
+    }, 350);
+    return () => clearTimeout(t);
+  }, [showBudgetModal]);
   useFocusTrap(settingsModalRef, showSettings);
   // Q3 — theme mode: dark (default) | light | system
   const [themeMode,        setThemeMode]        = useState<"dark"|"light"|"system">("dark");
@@ -1076,7 +1101,13 @@ export default function ApsaraSpendPage() {
   // 200ms is enough for the exit animation to start cleanly; faster on cached loads.
   useEffect(() => {
     if (!isLoaded) return;
-    const t = setTimeout(() => setShowSplash(false), 200);
+    const t = setTimeout(() => {
+      setShowSplash(false);
+      // GN1 — Show onboarding right after splash on first-ever open
+      if (typeof window !== "undefined" && !localStorage.getItem("apsara_onboarded_v2")) {
+        setTimeout(() => { setOnboardStep(0); setShowOnboarding(true); }, 400);
+      }
+    }, 200);
     return () => clearTimeout(t);
   }, [isLoaded]);
 
@@ -1368,16 +1399,20 @@ export default function ApsaraSpendPage() {
   };
 
   const handleResetMonth = () => {
-    setData((d) => ({
-      ...d,
-      transactions: d.transactions.filter((t) => {
+    setData((d) => {
+      // Remove transactions for this month
+      const transactions = d.transactions.filter((t) => {
         const dt = new Date(t.date);
         return toMonthKey(dt.getFullYear(), dt.getMonth() + 1) !== selectedMonth;
-      }),
-    }));
+      });
+      // Remove budget for this month — returns to InitScreen
+      const monthlyBalances = { ...d.monthlyBalances };
+      delete monthlyBalances[selectedMonth];
+      return { ...d, transactions, monthlyBalances };
+    });
     setResetConfirm(false);
     setShowSettings(false);
-    showToast(`${MONTH_FULL[month - 1]} ${year} data cleared.`, "warn");
+    showToast(`${MONTH_FULL[month - 1]} reset.`, "warn");
   };
 
   // A1 — Flexible budget engine: budget can be set OR updated at any time.
@@ -1406,10 +1441,6 @@ export default function ApsaraSpendPage() {
         : `Budget set to $${amount.toFixed(2)} for ${MONTH_FULL[month - 1]}.`,
       "success"
     );
-    // GN1 — show onboarding on first-ever budget set
-    if (!isEdit && typeof window !== "undefined" && !localStorage.getItem("apsara_onboarded")) {
-      setTimeout(() => { setOnboardStep(0); setShowOnboarding(true); }, 600);
-    }
   };
 
   const slideVariants = {
@@ -1488,7 +1519,7 @@ export default function ApsaraSpendPage() {
           total={totalUSD}
           monthBudget={data.monthlyBalances[selectedMonth] ?? 0}
           onSetBudget={() => setShowBudgetModal(true)}
-          onEditBudget={() => { setBudgetInput(String(monthBalance)); setShowBudgetModal(true); }}
+          onEditBudget={() => { setBudgetInput(monthBalance > 0 ? String(monthBalance) : ""); setShowBudgetModal(true); }}
         />
       </div>
 
@@ -1921,7 +1952,7 @@ export default function ApsaraSpendPage() {
         :root {
           --color-bg-page:     #080b10;
           --color-bg-card:     #0f131a;
-          --color-bg-input:    #0d1117;
+          --color-bg-input:    #141920;
           --color-bg-deep:     #080b10;
           --color-bg-nav:      #141920;
           --color-border:      #1a2333;
@@ -1930,12 +1961,24 @@ export default function ApsaraSpendPage() {
           --color-text-mid:    #cbd5e1;
           --color-text-lo:     #94a3b8;  /* 7.7:1 on dark bg — WCAG AA ✓ (was #475569 = 2.6:1 ✗) */
           --color-text-ghost:  #475569;  /* decorative only — swipe hint, dividers                */
+          /* Toast — dark mode: deep coloured surfaces */
+          --toast-warn-bg:     #1c1008;
+          --toast-warn-border: #92400e;
+          --toast-warn-text:   #fde68a;
+          --toast-ok-bg:       #051f12;
+          --toast-ok-border:   #047857;
+          --toast-ok-text:     #6ee7b7;
+          --toast-info-bg:     #0c1829;
+          --toast-info-border: #1d4ed8;
+          --toast-info-text:   #bfdbfe;
+          --toast-shadow:      0 8px 32px rgba(0,0,0,0.6);
+          --toast-bar-track:   rgba(255,255,255,0.08);
         }
         /* ── T1  Light mode: Slate-50 bg, Slate-900 text (WCAG AA) ──────── */
         html[data-theme="light"] {
           --color-bg-page:     #f8fafc;   /* Slate-50  */
           --color-bg-card:     #ffffff;   /* White     */
-          --color-bg-input:    #f1f5f9;   /* Slate-100 */
+          --color-bg-input:    #ffffff;   /* White — active inputs stand out clearly */
           --color-bg-deep:     #e2e8f0;   /* Slate-200 */
           --color-bg-nav:      #f1f5f9;   /* Slate-100 */
           --color-border:      #e2e8f0;   /* Slate-200 */
@@ -1944,6 +1987,18 @@ export default function ApsaraSpendPage() {
           --color-text-mid:    #334155;   /* Slate-700 — 10:1 ✓           */
           --color-text-lo:     #475569;   /* Slate-600 — 6.6:1 ✓          */
           --color-text-ghost:  #94a3b8;   /* Slate-400 — decorative only  */
+          /* Toast — light mode: soft tinted surfaces, dark text, minimal shadow */
+          --toast-warn-bg:     #fffbeb;
+          --toast-warn-border: #f59e0b;
+          --toast-warn-text:   #92400e;
+          --toast-ok-bg:       #ecfdf5;
+          --toast-ok-border:   #10b981;
+          --toast-ok-text:     #065f46;
+          --toast-info-bg:     #eff6ff;
+          --toast-info-border: #3b82f6;
+          --toast-info-text:   #1e40af;
+          --toast-shadow:      0 2px 12px rgba(0,0,0,0.08), 0 1px 4px rgba(0,0,0,0.06);
+          --toast-bar-track:   rgba(0,0,0,0.08);
         }
         html[data-theme="light"], html[data-theme="light"] body {
           background: var(--color-bg-page);
@@ -1972,7 +2027,7 @@ export default function ApsaraSpendPage() {
           border-radius: 12px;
           color: var(--color-text-hi);
           outline: none;
-          transition: border-color 0.18s, box-shadow 0.18s;
+          transition: border-color 0.18s, box-shadow 0.18s, background 0.18s;
         }
         .input-field:focus {
           border-color: var(--accent);
@@ -1980,8 +2035,14 @@ export default function ApsaraSpendPage() {
         }
         .input-field:disabled,
         .input-field[aria-disabled="true"] {
-          opacity: 0.45;
+          background: var(--color-bg-nav);   /* gray — clearly inactive */
+          opacity: 0.55;
           cursor: not-allowed;
+        }
+        /* Light mode override: disabled = Slate-100, active = white */
+        html[data-theme="light"] .input-field:disabled,
+        html[data-theme="light"] .input-field[aria-disabled="true"] {
+          background: #f1f5f9;
         }
 
         /* Input field — shared style for default + focus states              */
@@ -2278,50 +2339,98 @@ export default function ApsaraSpendPage() {
       {/* ════ GN1  FIRST-RUN ONBOARDING — 3-step tooltip overlay ════ */}
       <AnimatePresence>
         {showOnboarding && (() => {
-          const steps = [
-            { icon: "💰", title: "Budget first", body: "You've set your budget. Every expense tracks against it — you'll always know what's left." },
-            { icon: "➕", title: "Log expenses", body: "Tap Add Expense to log anything instantly. Choose USD or KHR, pick a category, add a note." },
-            { icon: "👆", title: "Swipe to manage", body: "Swipe any expense row left to reveal Edit and Delete actions." },
+          const steps: { Icon: React.FC<React.SVGProps<SVGSVGElement>>, color: string, title: string, body: string, hint: string }[] = [
+            {
+              Icon: CalendarDays as React.FC<React.SVGProps<SVGSVGElement>>,
+              color: "var(--accent)",
+              title: "Start with a budget",
+              body: "Set a monthly budget and every expense will track against it — you'll always know what's left.",
+              hint: "You can update your budget at any time. It's not locked in.",
+            },
+            {
+              Icon: Plus as React.FC<React.SVGProps<SVGSVGElement>>,
+              color: "var(--accent)",
+              title: "Log an expense",
+              body: "Tap Add Expense to log anything. Choose USD or KHR, pick a category, and add a note.",
+              hint: "Switch between currencies — values convert automatically.",
+            },
+            {
+              Icon: Trash2 as React.FC<React.SVGProps<SVGSVGElement>>,
+              color: "#ef4444",
+              title: "Swipe to delete",
+              body: "Swipe any expense left to reveal the Delete button. Tap a row to edit it.",
+              hint: "You have 5 seconds to undo any deletion.",
+            },
+            {
+              Icon: Settings as React.FC<React.SVGProps<SVGSVGElement>>,
+              color: "var(--color-text-lo)",
+              title: "Customise",
+              body: "Open Settings to switch themes, pick your accent colour, and set budget alert notifications.",
+              hint: "Budget mode: Soft warns, Hard requires a confirmation to go over.",
+            },
           ];
           const step = steps[onboardStep];
           const isLast = onboardStep === steps.length - 1;
           const dismiss = () => {
             setShowOnboarding(false);
-            localStorage.setItem("apsara_onboarded", "1");
+            localStorage.setItem("apsara_onboarded_v2", "1");
           };
+          const StepIcon = step.Icon;
           return (
             <motion.div
               key="onboarding"
               initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
               transition={{ duration: 0.25 }}
-              style={{ position: "fixed", inset: 0, background: "rgba(5,7,12,0.82)", zIndex: 900, display: "flex", alignItems: "flex-end", justifyContent: "center", padding: "0 16px calc(24px + env(safe-area-inset-bottom))" }}
+              style={{ position: "fixed", inset: 0, background: "rgba(5,7,12,0.84)", zIndex: 900, display: "flex", alignItems: "flex-end", justifyContent: "center", padding: "0 12px calc(20px + env(safe-area-inset-bottom))" }}
               onClick={dismiss}
             >
               <motion.div
                 key={onboardStep}
-                initial={{ opacity: 0, y: 24 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 12 }}
+                initial={{ opacity: 0, y: 28 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 10 }}
                 transition={{ type: "spring", damping: 28, stiffness: 320 }}
-                style={{ background: "var(--color-bg-card)", borderRadius: 20, padding: "24px 24px 20px", width: "100%", maxWidth: 420, border: "1px solid var(--color-border-mid)" }}
+                style={{ background: "var(--color-bg-card)", borderRadius: 24, padding: "28px 24px 20px", width: "100%", maxWidth: 440, border: "1px solid var(--color-border-mid)" }}
                 onClick={(e) => e.stopPropagation()}
               >
-                {/* Progress dots */}
-                <div style={{ display: "flex", justifyContent: "center", gap: 6, marginBottom: 20 }}>
-                  {steps.map((_, i) => (
-                    <div key={i} style={{ width: i === onboardStep ? 20 : 6, height: 6, borderRadius: 99, background: i === onboardStep ? "var(--accent)" : "var(--color-border-mid)", transition: "all 0.25s" }} />
-                  ))}
+                {/* Step counter + dots */}
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 24 }}>
+                  <span style={{ fontSize: 11, fontWeight: 500, color: "var(--color-text-lo)", fontFamily: "var(--font-body)" }}>
+                    {onboardStep + 1} of {steps.length}
+                  </span>
+                  <div style={{ display: "flex", gap: 5 }}>
+                    {steps.map((_, i) => (
+                      <div key={i} style={{ width: i === onboardStep ? 18 : 5, height: 5, borderRadius: 99, background: i === onboardStep ? "var(--accent)" : "var(--color-border-mid)", transition: "all 0.25s" }} />
+                    ))}
+                  </div>
                 </div>
-                {/* Content */}
-                <div style={{ fontSize: 28, textAlign: "center", marginBottom: 10 }}>{step.icon}</div>
-                <div style={{ fontSize: 18, fontWeight: 700, color: "var(--color-text-hi)", fontFamily: "var(--font-headline)", textAlign: "center", marginBottom: 8 }}>{step.title}</div>
-                <div style={{ fontSize: 14, color: "var(--color-text-lo)", fontFamily: "var(--font-body)", textAlign: "center", lineHeight: 1.6, marginBottom: 20 }}>{step.body}</div>
+
+                {/* Icon in accent pill */}
+                <div style={{ display: "flex", justifyContent: "center", marginBottom: 20 }}>
+                  <div style={{ width: 60, height: 60, borderRadius: 18, background: step.color === "var(--accent)" ? "var(--accent-muted)" : "#ef444415", border: `1px solid ${step.color === "var(--accent)" ? "var(--accent-border)" : "#ef444435"}`, display: "flex", alignItems: "center", justifyContent: "center" }}>
+                    <StepIcon style={{ width: 26, height: 26, color: step.color, stroke: step.color }} />
+                  </div>
+                </div>
+
+                {/* Title + body */}
+                <div style={{ fontSize: 20, fontWeight: 700, color: "var(--color-text-hi)", fontFamily: "var(--font-headline)", textAlign: "center", marginBottom: 8, letterSpacing: "-0.01em" }}>{step.title}</div>
+                <div style={{ fontSize: 14, color: "var(--color-text-lo)", fontFamily: "var(--font-body)", textAlign: "center", lineHeight: 1.65, marginBottom: 14 }}>{step.body}</div>
+
+                {/* Hint chip */}
+                <div style={{ background: "var(--color-bg-page)", border: "1px solid var(--color-border)", borderRadius: 10, padding: "8px 14px", marginBottom: 20, display: "flex", alignItems: "flex-start", gap: 8 }}>
+                  <Lightbulb size={13} color="var(--color-text-lo)" strokeWidth={1.8} style={{ flexShrink: 0, marginTop: 1 }} />
+                  <span style={{ fontSize: 12, color: "var(--color-text-lo)", fontFamily: "var(--font-body)", lineHeight: 1.55 }}>{step.hint}</span>
+                </div>
+
                 {/* Actions */}
                 <div style={{ display: "flex", gap: 10 }}>
-                  <button onClick={dismiss} style={{ padding: "11px 0", borderRadius: 12, border: "1px solid var(--color-border-mid)", background: "transparent", color: "var(--color-text-lo)", fontSize: 14, fontFamily: "var(--font-body)", cursor: "pointer", flex: 1 }}>Skip</button>
+                  <button onClick={dismiss}
+                    style={{ padding: "12px 0", borderRadius: 12, border: "1px solid var(--color-border-mid)", background: "transparent", color: "var(--color-text-lo)", fontSize: 13, fontFamily: "var(--font-body)", cursor: "pointer", flex: 1 }}>
+                    Skip
+                  </button>
                   <button
                     onClick={() => isLast ? dismiss() : setOnboardStep((s) => s + 1)}
                     className="btn-primary"
-                    style={{ padding: "11px 0", fontSize: 14, fontFamily: "var(--font-body)", flex: 2 }}>
-                    {isLast ? "Get started" : "Next →"}
+                    style={{ padding: "12px 0", fontSize: 14, fontFamily: "var(--font-body)", flex: 2 }}>
+                    {isLast ? "Set my budget" : "Next"}
                   </button>
                 </div>
               </motion.div>
@@ -2641,22 +2750,7 @@ export default function ApsaraSpendPage() {
                     Delete
                   </button>
                 </div>
-              </motion.div>
-
-              {/* Cancel pill */}
-              <motion.div
-                initial={{ y: 44, opacity: 0 }} animate={{ y: 0, opacity: 1 }}
-                exit={{ y: 44, opacity: 0 }}
-                transition={{ type: "spring", damping: 32, stiffness: 320, delay: 0.04 }}
-                style={{ background: "var(--color-bg-card)", borderRadius: 16, overflow: "hidden", border: "1px solid var(--color-border-mid)" }}
-                onClick={(e) => e.stopPropagation()}
-              >
-                <button
-                  onClick={() => { setConfirmDeleteTx(null); setOpenSwipeId(null); }}
-                  style={{ width: "100%", padding: "16px 0", background: "transparent", border: "none", cursor: "pointer", fontSize: 16, fontWeight: 600, color: "var(--accent)", fontFamily: "var(--font-body)", textAlign: "center" }}>
-                  Cancel
-                </button>
-              </motion.div>
+            </motion.div>
             </motion.div>
             );
           })()}
@@ -2727,13 +2821,14 @@ export default function ApsaraSpendPage() {
                 <div style={{ position: "relative", marginBottom: 16 }}>
                   <span style={{ position: "absolute", left: 16, top: "50%", transform: "translateY(-50%)", fontSize: 22, color: "var(--accent)", fontWeight: 700, fontFamily: "var(--font-headline)", pointerEvents: "none", zIndex: 1 }}>$</span>
                   <input
+                    ref={budgetInputRef}
                     type="text"
                     inputMode="decimal"
                     value={budgetInput}
                     onChange={(e) => setBudgetInput(sanitizeNum(e.target.value))}
                     onKeyDown={(e) => e.key === "Enter" && handleSetBudget()}
                     placeholder="0.00"
-                    autoFocus
+                    onFocus={(e) => { const len = e.target.value.length; e.target.setSelectionRange(len, len); }}
                     className="input-field"
                     style={{
                       width: "100%", boxSizing: "border-box",
@@ -2787,7 +2882,7 @@ export default function ApsaraSpendPage() {
             </motion.div>
           )}
 
-          {/* ── Settings sheet — data management only ── */}
+          {/* ── Settings sheet ── */}
           {showSettings && (
             <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
               className="modal-backdrop"
@@ -2800,186 +2895,133 @@ export default function ApsaraSpendPage() {
                 transition={{ type: "spring", damping: 28, stiffness: 280 }}
                 className="modal-sheet"
                 role="dialog" aria-modal="true" aria-label="Settings"
-                style={{ background: "var(--color-bg-card)", padding: "28px 28px 56px", width: "100%", border: "1px solid var(--color-border)", maxWidth: 480, margin: "0 auto" }}
+                style={{ background: "var(--color-bg-card)", padding: "24px 20px 48px", width: "100%", border: "1px solid var(--color-border)", maxWidth: 480, margin: "0 auto" }}
                 onClick={(e) => e.stopPropagation()}>
-                {pageModalMode === "sheet" && <div style={{ width: 36, height: 4, background: "var(--color-border-mid)", borderRadius: 2, margin: "0 auto 24px" }} />}
 
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 24 }}>
-                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                    <Settings className="icon-nav" color="var(--color-text-lo)" strokeWidth={1.8} />
-                    <span style={{ fontSize: 22, fontWeight: 600, color: "var(--color-text-hi)", fontFamily: "var(--font-headline)", letterSpacing: "-0.01em" }}>Settings</span>
-                  </div>
+                {/* Drag handle */}
+                {pageModalMode === "sheet" && <div style={{ width: 36, height: 4, background: "var(--color-border-mid)", borderRadius: 2, margin: "0 auto 20px" }} />}
+
+                {/* Header */}
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
+                  <span style={{ fontSize: 18, fontWeight: 700, color: "var(--color-text-hi)", fontFamily: "var(--font-headline)", letterSpacing: "-0.01em" }}>Settings</span>
                   <button aria-label="Close settings"
                     onClick={() => { setShowSettings(false); setResetConfirm(false); }}
-                    style={{ background: "var(--color-bg-nav)", border: "none", borderRadius: 9, padding: 9, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", minWidth: 36, minHeight: 36 }}>
-                    <X className="icon-nav" color="var(--color-text-lo)" strokeWidth={2} />
+                    style={{ background: "var(--color-bg-nav)", border: "none", borderRadius: 9, padding: 8, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                    <X size={16} color="var(--color-text-lo)" strokeWidth={2} />
                   </button>
                 </div>
 
-                {/* ── Q5  Theme Mode ── */}
-                <div style={{ background: "var(--color-bg-page)", borderRadius: 14, padding: 16, marginBottom: 16 }}>
-                  {/* Theme toggle */}
-                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
-                    <span style={{ fontSize: 13, fontWeight: 600, color: "var(--color-text-mid)", fontFamily: "var(--font-body)" }}>Theme</span>
-                    <div role="radiogroup" aria-label="Theme mode" style={{ display: "flex", background: "var(--color-bg-nav)", borderRadius: 10, padding: 3, gap: 3 }}>
+                {/* ── Group 1: Appearance ── */}
+                <div style={{ background: "var(--color-bg-page)", borderRadius: 14, overflow: "hidden", marginBottom: 12 }}>
+
+                  {/* Theme row */}
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "13px 16px", borderBottom: "0.5px solid var(--color-border)" }}>
+                    <span style={{ fontSize: 13, fontWeight: 500, color: "var(--color-text-mid)", fontFamily: "var(--font-body)" }}>Theme</span>
+                    <div role="radiogroup" aria-label="Theme mode" style={{ display: "flex", background: "var(--color-bg-nav)", borderRadius: 8, padding: 2, gap: 2 }}>
                       {(["dark", "system", "light"] as const).map((m) => (
-                        <button key={m}
-                          role="radio"
-                          aria-checked={themeMode === m}
-                          onClick={() => setThemeMode(m)}
-                          style={{
-                            padding: "6px 12px", borderRadius: 7, border: "none", cursor: "pointer",
-                            background: themeMode === m ? "var(--accent)" : "transparent",
-                            color: themeMode === m ? "var(--accent-text)" : "var(--color-text-lo)",
-                            fontSize: 11, fontWeight: 600, fontFamily: "var(--font-body)",
-                            textTransform: "capitalize", transition: "all 0.15s",
-                          }}>
+                        <button key={m} role="radio" aria-checked={themeMode === m} onClick={() => setThemeMode(m)}
+                          style={{ padding: "5px 10px", borderRadius: 6, border: "none", cursor: "pointer", background: themeMode === m ? "var(--accent)" : "transparent", color: themeMode === m ? "var(--accent-text)" : "var(--color-text-lo)", fontSize: 11, fontWeight: 600, fontFamily: "var(--font-body)", textTransform: "capitalize", transition: "all 0.15s" }}>
                           {m}
                         </button>
                       ))}
                     </div>
                   </div>
 
-                  {/* Q4 — Palette switcher */}
-                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
-                    <span style={{ fontSize: 13, fontWeight: 600, color: "var(--color-text-mid)", fontFamily: "var(--font-body)" }}>Accent</span>
-                    <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+                  {/* Accent row */}
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "13px 16px", borderBottom: "0.5px solid var(--color-border)" }}>
+                    <span style={{ fontSize: 13, fontWeight: 500, color: "var(--color-text-mid)", fontFamily: "var(--font-body)" }}>Accent</span>
+                    <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
                       {([
                         { id: "yellow",  hex: "#fbbf24" },
                         { id: "indigo",  hex: "#818cf8" },
                         { id: "emerald", hex: "#34d399" },
                         { id: "rose",    hex: "#fb7185" },
                       ] as const).map(({ id, hex }) => (
-                        <button
-                          key={id}
-                          aria-label={`${id} palette`}
-                          onClick={() => setPalette(id)}
-                          style={{
-                            width: 26, height: 26, borderRadius: "50%",
-                            background: hex, border: "none", cursor: "pointer",
-                            boxShadow: palette === id ? `0 0 0 2px var(--color-bg-card), 0 0 0 4px ${hex}` : "none",
-                            transition: "box-shadow 0.15s",
-                          }}
-                        />
+                        <button key={id} aria-label={`${id} palette`} onClick={() => setPalette(id)}
+                          style={{ width: 22, height: 22, borderRadius: "50%", background: hex, border: "none", cursor: "pointer", boxShadow: palette === id ? `0 0 0 2px var(--color-bg-card), 0 0 0 3.5px ${hex}` : "none", transition: "box-shadow 0.15s" }} />
                       ))}
                     </div>
                   </div>
 
-                  {/* C4 — Budget Mode toggle */}
-                  <div>
-                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
-                      <span style={{ fontSize: 13, fontWeight: 600, color: "var(--color-text-mid)", fontFamily: "var(--font-body)" }}>Budget Mode</span>
-                      <div role="radiogroup" aria-label="Budget mode" style={{ display: "flex", background: "var(--color-bg-nav)", borderRadius: 10, padding: 3, gap: 3 }}>
+                  {/* Budget Mode row */}
+                  <div style={{ padding: "13px 16px" }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: constraintMode ? 6 : 0 }}>
+                      <span style={{ fontSize: 13, fontWeight: 500, color: "var(--color-text-mid)", fontFamily: "var(--font-body)" }}>Budget mode</span>
+                      <div role="radiogroup" aria-label="Budget mode" style={{ display: "flex", background: "var(--color-bg-nav)", borderRadius: 8, padding: 2, gap: 2 }}>
                         {(["soft", "hard"] as const).map((m) => (
-                          <button key={m}
-                            role="radio"
-                            aria-checked={constraintMode === m}
-                            onClick={() => setConstraintMode(m)}
-                            style={{
-                              padding: "6px 14px", borderRadius: 7, border: "none", cursor: "pointer",
-                              background: constraintMode === m ? "var(--accent)" : "transparent",
-                              color: constraintMode === m ? "var(--accent-text)" : "var(--color-text-lo)",
-                              fontSize: 11, fontWeight: 600, fontFamily: "var(--font-body)",
-                              textTransform: "capitalize", transition: "all 0.15s",
-                            }}>
+                          <button key={m} role="radio" aria-checked={constraintMode === m} onClick={() => setConstraintMode(m)}
+                            style={{ padding: "5px 12px", borderRadius: 6, border: "none", cursor: "pointer", background: constraintMode === m ? "var(--accent)" : "transparent", color: constraintMode === m ? "var(--accent-text)" : "var(--color-text-lo)", fontSize: 11, fontWeight: 600, fontFamily: "var(--font-body)", textTransform: "capitalize", transition: "all 0.15s" }}>
                             {m}
                           </button>
                         ))}
                       </div>
                     </div>
-                    <div style={{ fontSize: 11, color: "var(--color-text-lo)", fontFamily: "var(--font-body)", lineHeight: 1.5, display: "flex", alignItems: "center", gap: 5 }}>
-                      {constraintMode === "soft"
-                        ? <><Zap size={11} color="var(--color-text-lo)" strokeWidth={2} /> Soft — allows over-budget entries with a warning.</>
-                        : <><Lock size={11} color="var(--color-text-lo)" strokeWidth={2} /> Hard — requires confirmation before exceeding your budget.</>}
+                    <div style={{ fontSize: 11, color: "var(--color-text-lo)", fontFamily: "var(--font-body)", lineHeight: 1.5 }}>
+                      {constraintMode === "soft" ? "Allows over-budget entries with a warning." : "Requires confirmation before exceeding your budget."}
                     </div>
                   </div>
                 </div>
 
-                {/* Static rate info */}
-                <div style={{ background: "var(--color-bg-page)", borderRadius: 12, padding: "12px 16px", marginBottom: 16, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                  <div>
-                    <div style={{ fontSize: 12, color: "var(--color-text-lo)", marginBottom: 2, fontFamily: "var(--font-body)" }}>Exchange rate</div>
-                    <div style={{ fontSize: 16, fontWeight: 700, color: "var(--color-text-lo)", fontFamily: "var(--font-mono)" }}>1 USD = 4,000 ៛</div>
-                  </div>
-                  <span style={{ fontSize: 11, background: "var(--color-border-mid)", color: "var(--color-text-lo)", padding: "4px 10px", borderRadius: 99, letterSpacing: "0.06em", fontFamily: "var(--font-body)", fontWeight: 600 }}>Fixed</span>
-                </div>
-
-                {/* E1 — Notifications */}
+                {/* ── Group 2: Notifications ── */}
                 {notifPermission !== "unsupported" && (
-                  <>
-                    <div style={{ background: "var(--color-bg-page)", borderRadius: 14, padding: 16, marginBottom: 16 }}>
-                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
-                        <div>
-                          <div style={{ fontSize: 13, fontWeight: 600, color: "var(--color-text-mid)", fontFamily: "var(--font-body)", marginBottom: 2 }}>Budget Alerts</div>
-                          <div style={{ fontSize: 11, color: "var(--color-text-lo)", fontFamily: "var(--font-body)" }}>
-                            {notifPermission === "granted"  && <><Check size={11} color="#34d399" strokeWidth={2.5} style={{ display: "inline", verticalAlign: "middle", marginRight: 3 }} />Alerts at 80% and 95% of budget</>}
-                            {notifPermission === "denied"   && "Blocked — enable in browser settings"}
-                            {notifPermission === "default"  && "Get notified when nearing your limit"}
-                          </div>
+                  <div style={{ background: "var(--color-bg-page)", borderRadius: 14, overflow: "hidden", marginBottom: 12 }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "13px 16px" }}>
+                      <div>
+                        <div style={{ fontSize: 13, fontWeight: 500, color: "var(--color-text-mid)", fontFamily: "var(--font-body)", marginBottom: 2 }}>Budget alerts</div>
+                        <div style={{ fontSize: 11, color: "var(--color-text-lo)", fontFamily: "var(--font-body)" }}>
+                          {notifPermission === "granted" && <><Check size={11} color="#34d399" strokeWidth={2.5} style={{ display: "inline", verticalAlign: "middle", marginRight: 3 }} />At 80% and 95% of budget</>}
+                          {notifPermission === "denied"  && "Blocked — enable in browser settings"}
+                          {notifPermission === "default" && "Get notified when nearing your limit"}
                         </div>
-                        {notifPermission === "default" && (
-                          <button onClick={requestNotifPermission}
-                            style={{
-                              background: "var(--accent-muted)", border: "1px solid var(--accent-border)",
-                              color: "var(--accent)", borderRadius: 8, padding: "6px 12px",
-                              fontSize: 11, fontWeight: 600, fontFamily: "var(--font-body)", cursor: "pointer", whiteSpace: "nowrap",
-                            }}>
-                            Enable
-                          </button>
-                        )}
-                        {notifPermission === "granted" && (
-                          <span style={{ fontSize: 11, background: "#34d39920", color: "#34d399", border: "1px solid #34d39940", padding: "4px 10px", borderRadius: 99, fontFamily: "var(--font-body)", fontWeight: 600 }}>
-                            Active
-                          </span>
-                        )}
-                        {notifPermission === "denied" && (
-                          <span style={{ fontSize: 11, background: "#ef444418", color: "#ef4444", border: "1px solid #ef444440", padding: "4px 10px", borderRadius: 99, fontFamily: "var(--font-body)", fontWeight: 600 }}>
-                            Blocked
-                          </span>
-                        )}
                       </div>
+                      {notifPermission === "default" && (
+                        <button onClick={requestNotifPermission}
+                          style={{ background: "var(--accent-muted)", border: "1px solid var(--accent-border)", color: "var(--accent)", borderRadius: 8, padding: "6px 12px", fontSize: 11, fontWeight: 600, fontFamily: "var(--font-body)", cursor: "pointer", whiteSpace: "nowrap" }}>
+                          Enable
+                        </button>
+                      )}
+                      {notifPermission === "granted" && (
+                        <span style={{ fontSize: 11, background: "#34d39920", color: "#34d399", border: "1px solid #34d39940", padding: "3px 9px", borderRadius: 99, fontFamily: "var(--font-body)", fontWeight: 500 }}>Active</span>
+                      )}
+                      {notifPermission === "denied" && (
+                        <span style={{ fontSize: 11, background: "#ef444418", color: "#ef4444", border: "1px solid #ef444440", padding: "3px 9px", borderRadius: 99, fontFamily: "var(--font-body)", fontWeight: 500 }}>Blocked</span>
+                      )}
                     </div>
-                  </>
+                  </div>
                 )}
 
-                {/* Data Management — only shown when this month has data */}
-                {monthTxs.length > 0 && (
-                <>
-                <div style={{ height: 1, background: "var(--color-border)", margin: "0 0 16px" }} />
-                <div style={{ background: "var(--color-bg-page)", borderRadius: 14, padding: 16 }}>
-                  {!resetConfirm ? (
-                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                      <div>
-                        <div style={{ fontSize: 14, fontWeight: 600, color: "var(--color-text-lo)", fontFamily: "var(--font-body)", lineHeight: 1.4 }}>
-                          Clear {MONTH_FULL[month - 1]} {year} data
+                {/* ── Group 4: Data — shown when month has a budget or entries ── */}
+                {(monthTxs.length > 0 || monthBalance > 0) && (
+                  <div style={{ background: "var(--color-bg-page)", borderRadius: 14, overflow: "hidden" }}>
+                    {!resetConfirm ? (
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "13px 16px" }}>
+                        <div>
+                          <div style={{ fontSize: 13, fontWeight: 500, color: "var(--color-text-lo)", fontFamily: "var(--font-body)", marginBottom: 2 }}>
+                            Reset {MONTH_FULL[month - 1]}
+                          </div>
+                          <div style={{ fontSize: 11, color: "var(--color-text-lo)", fontFamily: "var(--font-body)", opacity: 0.7 }}>
+                            Clears {monthTxs.length > 0 ? `${monthTxs.length} ${monthTxs.length === 1 ? "entry" : "entries"} and ` : ""}the budget
+                          </div>
                         </div>
-                        <div style={{ fontSize: 12, color: "var(--color-text-lo)", marginTop: 4, fontFamily: "var(--font-body)", lineHeight: 1.5 }}>Removes all entries for this month</div>
-                      </div>
-                      <button onClick={() => setResetConfirm(true)}
-                        style={{ background: "#ef444418", border: "1px solid #ef444440", color: "#ef4444", borderRadius: 9, padding: "8px 14px", cursor: "pointer", fontSize: 13, fontWeight: 600, fontFamily: "var(--font-body)", whiteSpace: "nowrap" }}>
-                        Clear
-                      </button>
-                    </div>
-                  ) : (
-                    <div>
-                      <div style={{ fontSize: 14, color: "var(--color-text-hi)", fontWeight: 600, marginBottom: 14, fontFamily: "var(--font-body)", lineHeight: 1.5 }}>
-                        Delete all {MONTH_FULL[month - 1]} {year} entries? This cannot be undone.
-                      </div>
-                      <div style={{ display: "flex", gap: 8 }}>
-                        <button onClick={() => setResetConfirm(false)} className="btn-ghost"
-                          style={{ flex: 1, padding: 12, fontSize: 14, fontFamily: "var(--font-body)" }}>
-                          Cancel
+                        <button onClick={() => setResetConfirm(true)}
+                          style={{ background: "#ef444418", border: "1px solid #ef444440", color: "#ef4444", borderRadius: 8, padding: "6px 12px", cursor: "pointer", fontSize: 12, fontWeight: 600, fontFamily: "var(--font-body)", whiteSpace: "nowrap" }}>
+                          Reset
                         </button>
+                      </div>
+                    ) : (
+                      <div style={{ padding: "14px 16px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                        <div style={{ fontSize: 12, color: "var(--color-text-lo)", fontFamily: "var(--font-body)", lineHeight: 1.5, flex: 1, paddingRight: 12 }}>
+                          Removes all {MONTH_FULL[month - 1]} entries and resets the budget. Cannot be undone.
+                        </div>
                         <button onClick={handleResetMonth}
-                          style={{ flex: 1, padding: 12, background: "#ef4444", border: "none", color: "#fff", borderRadius: 14, cursor: "pointer", fontSize: 14, fontWeight: 700, fontFamily: "var(--font-body)" }}>
-                          Yes, clear
+                          style={{ background: "#ef4444", border: "none", color: "#fff", borderRadius: 8, padding: "7px 14px", cursor: "pointer", fontSize: 12, fontWeight: 700, fontFamily: "var(--font-body)", whiteSpace: "nowrap", flexShrink: 0 }}>
+                          Confirm
                         </button>
                       </div>
-                    </div>
-                  )}
-                </div>
-                </>
-                )}{/* end monthTxs.length > 0 */}
+                    )}
+                  </div>
+                )}
+
               </motion.div>
             </motion.div>
           )}
@@ -2996,18 +3038,21 @@ export default function ApsaraSpendPage() {
               transition={{ duration: 0.22 }}
               style={{
                 position: "fixed", bottom: 100, left: "50%", zIndex: 400,
-                background: toast.type === "warn" ? "#1c1008" : toast.type === "success" ? "#051f12" : "#0c1829",
-                border: `1px solid ${toast.type === "warn" ? "#92400e" : toast.type === "success" ? "#047857" : "#1d4ed8"}`,
-                borderRadius: 16, overflow: "hidden",
-                maxWidth: "calc(100vw - 48px)", minWidth: 220,
-                boxShadow: "0 8px 32px rgba(0,0,0,0.6)",
+                background: toast.type === "warn" ? "var(--toast-warn-bg)" : toast.type === "success" ? "var(--toast-ok-bg)" : "var(--toast-info-bg)",
+                border: "1px solid",
+                borderColor: toast.type === "warn" ? "var(--toast-warn-border)" : toast.type === "success" ? "var(--toast-ok-border)" : "var(--toast-info-border)",
+                borderRadius: 14,
+                width: "fit-content",
+                maxWidth: "calc(100vw - 48px)",
+                boxShadow: "var(--toast-shadow)",
               }}>
               {/* Content row */}
-              <div style={{ display: "flex", alignItems: "center", gap: 10, padding: toast.undoFn ? "12px 8px 12px 16px" : "12px 18px" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 10, padding: toast.undoFn ? "10px 8px 10px 14px" : "10px 16px" }}>
                 <span style={{
                   flex: 1, fontSize: 13, fontWeight: 500,
-                  color: toast.type === "warn" ? "#fde68a" : toast.type === "success" ? "#6ee7b7" : "#bfdbfe",
+                  color: toast.type === "warn" ? "var(--toast-warn-text)" : toast.type === "success" ? "var(--toast-ok-text)" : "var(--toast-info-text)",
                   fontFamily: "var(--font-body)", lineHeight: 1.4,
+                  whiteSpace: "nowrap",
                 }}>
                   {toast.msg}
                 </span>
@@ -3016,24 +3061,24 @@ export default function ApsaraSpendPage() {
                     onClick={() => { toast.undoFn?.(); setToast(null); }}
                     style={{
                       flexShrink: 0,
-                      background: "#fff",
+                      background: toast.type === "warn" ? "var(--toast-warn-border)" : toast.type === "success" ? "var(--toast-ok-border)" : "var(--toast-info-border)",
                       border: "none", borderRadius: 8,
-                      padding: "7px 16px", cursor: "pointer",
+                      padding: "6px 14px", cursor: "pointer",
                       fontSize: 12, fontWeight: 700,
-                      color: "#111",
+                      color: "#fff",
                       fontFamily: "var(--font-body)", letterSpacing: "0.02em",
                     }}>
                     Undo
                   </button>
                 )}
               </div>
-              {/* Countdown progress bar — only on undo toasts */}
+              {/* Countdown bar */}
               {toast.undoFn && (
-                <div style={{ height: 2, background: "rgba(255,255,255,0.08)" }}>
+                <div style={{ height: 2, background: "var(--toast-bar-track)", overflow: "hidden", borderRadius: "0 0 14px 14px" }}>
                   <div style={{
                     height: "100%",
                     width: `${toastProgress}%`,
-                    background: toast.type === "warn" ? "#f59e0b" : "#34d399",
+                    background: toast.type === "warn" ? "var(--toast-warn-border)" : "var(--toast-ok-border)",
                     transition: "width 0.1s linear",
                   }} />
                 </div>
