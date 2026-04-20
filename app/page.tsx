@@ -2538,10 +2538,14 @@ export default function ApsaraSpendPage() {
 
           </div>{/* end .sticky-header */}
 
-          {/* ════ DASHBOARD — month content ════ */}
-          <div
+          {/* ════ SWIPEABLE DASHBOARD — horizontal drag navigates months ════ */}
+          <motion.div
+            drag="x"
+            dragConstraints={{ left: 0, right: 0 }}
+            dragElastic={0.12}
+            onDragEnd={handleDragEnd}
             onClick={() => { showFilterMenu && setShowFilterMenu(false); openSwipeId && setOpenSwipeId(null); }}
-            style={{ touchAction: "pan-y" }}>
+            style={{ touchAction: "pan-y", cursor: "grab" }}>
             <AnimatePresence mode="wait" custom={swipeDir}>
               <motion.div key={selectedMonth} custom={swipeDir} variants={slideVariants}
                 initial="enter" animate="center" exit="exit"
@@ -2629,16 +2633,14 @@ export default function ApsaraSpendPage() {
 
               </motion.div>
             </AnimatePresence>
-          </div>
 
           {showSwipeHint && hasData && (
           <div className="swipe-hint" style={{ textAlign: "center", marginTop: 14, fontSize: 11, color: "var(--color-text-ghost)", letterSpacing: "0.1em", fontFamily: "var(--font-body)" }}>
             ← SWIPE TO NAVIGATE MONTHS →
           </div>
           )}
-        </div>
-
-        {/* ════ FAB — only after hydration completes to avoid SSR mismatch ════ */}
+          </motion.div>
+        </div>{/* end main-scroll */}
         {isLoaded && hasMonthBudget && (
         <div className="fab-footer">
         <motion.button
