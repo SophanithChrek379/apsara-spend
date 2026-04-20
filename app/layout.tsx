@@ -1,4 +1,5 @@
 import type { Metadata, Viewport } from "next";
+import Script from "next/script";
 
 export const metadata: Metadata = {
   title: "Apsara Spend",
@@ -45,14 +46,26 @@ export default function RootLayout({
       </head>
       <body style={{ margin: 0, padding: 0 }}>
         {children}
-        {/* W2 — Service worker registration: SSR-safe, runs only in browser after load */}
-        <script dangerouslySetInnerHTML={{ __html: `
-          if ('serviceWorker' in navigator) {
-            window.addEventListener('load', function() {
-              navigator.serviceWorker.register('/sw.js').catch(function() {});
-            });
-          }
-        `}} />
+        {process.env.NODE_ENV === "production" ? (
+          <Script id="sw-register" strategy="afterInteractive">
+            {`if ('serviceWorker' in navigator) {
+              window.addEventListener('load', function() {
+                navigator.serviceWorker.register('/sw.js').catch(function(){});
+              });
+            }`}
+          </Script>
+        ) : (
+          <Script id="sw-unregister" strategy="afterInteractive">
+            {`if ('serviceWorker' in navigator) {
+              navigator.serviceWorker.getRegistrations().then(function(regs){
+                regs.forEach(function(r){ r.unregister(); });
+              });
+              if ('caches' in window) {
+                caches.keys().then(function(keys){ keys.forEach(function(k){ caches.delete(k); }); });
+              }
+            }`}
+          </Script>
+        )}
       </body>
     </html>
   );
