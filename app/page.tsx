@@ -923,20 +923,35 @@ function EntryModal({ tx, selectedMonth, monthBalance, totalUSD: currentTotal, c
 
       {/* C3 — Hard mode: over-budget confirmation overlay */}
       <AnimatePresence>
-        {showHardConfirm && (
+        {showHardConfirm && (() => {
+          const hcMode = getModalAnim();
+          return (
           <motion.div
             initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-            style={{ position: "fixed", inset: 0, background: "rgba(5,7,12,0.92)", zIndex: 300, display: "flex", alignItems: "center", justifyContent: "center", padding: 24 }}
+            style={{
+              position: "fixed", inset: 0, background: "rgba(5,7,12,0.92)", zIndex: 300,
+              display: "flex",
+              alignItems: hcMode === "center" ? "center" : "flex-end",
+              justifyContent: hcMode === "center" ? "center" : "stretch",
+              padding: hcMode === "center" ? 24 : `0 0 calc(env(safe-area-inset-bottom))`,
+            }}
             onClick={() => setShowHardConfirm(false)}
           >
             <motion.div
-              initial={{ scale: 0.92, opacity: 0, y: 16 }} animate={{ scale: 1, opacity: 1, y: 0 }}
-              exit={{ scale: 0.92, opacity: 0, y: 8 }}
-              transition={{ type: "spring", damping: 22, stiffness: 300 }}
+              initial={hcMode === "center" ? MODAL_ENTER_CENTER : MODAL_ENTER_SHEET}
+              animate={hcMode === "center" ? MODAL_ANIM_CENTER  : MODAL_ANIM_SHEET}
+              exit={hcMode   === "center" ? MODAL_EXIT_CENTER   : MODAL_EXIT_SHEET}
+              transition={{ type: "spring", damping: 28, stiffness: 300 }}
               role="alertdialog" aria-modal="true" aria-label="Over budget confirmation"
-              style={{ background: "var(--color-bg-card)", borderRadius: 24, padding: 28, width: "100%", maxWidth: 360, border: "1px solid #ef444440" }}
+              style={{
+                background: "var(--color-bg-card)",
+                borderRadius: hcMode === "center" ? 24 : "24px 24px 0 0",
+                padding: 28, border: "1px solid #ef444440",
+                width: "100%", maxWidth: hcMode === "center" ? 360 : "100%",
+              }}
               onClick={(e) => e.stopPropagation()}
             >
+              {hcMode === "sheet" && <div style={{ width: 36, height: 4, background: "var(--color-border-mid)", borderRadius: 2, margin: "0 auto 20px" }} />}
               <div style={{ width: 48, height: 48, borderRadius: "50%", background: "#ef444418", border: "1px solid #ef444440", display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 16px" }}>
                 <AlertTriangle size={22} color="#ef4444" strokeWidth={2} />
               </div>
@@ -962,7 +977,8 @@ function EntryModal({ tx, selectedMonth, monthBalance, totalUSD: currentTotal, c
               </div>
             </motion.div>
           </motion.div>
-        )}
+          );
+        })()}
       </AnimatePresence>
     </motion.div>
   );
@@ -2632,31 +2648,47 @@ export default function ApsaraSpendPage() {
             return (
             <motion.div
               initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-              style={{ position: "fixed", inset: 0, background: "rgba(5,7,12,0.78)", zIndex: 260, display: "flex", flexDirection: "column", justifyContent: "flex-end", padding: "0 12px calc(12px + env(safe-area-inset-bottom))" }}
+              className="modal-backdrop"
+              style={{
+                position: "fixed", inset: 0, background: "rgba(5,7,12,0.78)", zIndex: 260,
+                display: "flex",
+                padding: pageModalMode === "center" ? "24px" : `0 0 calc(12px + env(safe-area-inset-bottom))`,
+              }}
               onClick={() => { setConfirmDeleteTx(null); setOpenSwipeId(null); }}>
 
-              {/* Card 1 — preview + actions */}
+              {/* Card */}
               <motion.div
-                initial={{ y: 44, opacity: 0 }} animate={{ y: 0, opacity: 1 }}
-                exit={{ y: 44, opacity: 0 }}
+                initial={pageModalMode === "center" ? MODAL_ENTER_CENTER : { y: 44, opacity: 0 }}
+                animate={pageModalMode === "center" ? MODAL_ANIM_CENTER  : { y: 0, opacity: 1 }}
+                exit={pageModalMode   === "center" ? MODAL_EXIT_CENTER   : { y: 44, opacity: 0 }}
                 transition={{ type: "spring", damping: 30, stiffness: 320 }}
                 role="alertdialog" aria-modal="true" aria-label="Confirm delete expense"
-                style={{ background: "var(--color-bg-card)", borderRadius: 20, overflow: "hidden", marginBottom: 10, border: "1px solid var(--color-border-mid)" }}
+                style={{
+                  background: "var(--color-bg-card)", overflow: "hidden",
+                  border: "1px solid var(--color-border-mid)",
+                  borderRadius: 20,
+                  width: "100%",
+                  maxWidth: pageModalMode === "center" ? 380 : 480,
+                  margin: pageModalMode === "center" ? 0 : "0 auto",
+                  marginBottom: pageModalMode === "center" ? 0 : 10,
+                }}
                 onClick={(e) => e.stopPropagation()}>
+
+                {/* Drag handle on sheet */}
+                {pageModalMode === "sheet" && (
+                  <div style={{ width: 36, height: 4, background: "var(--color-border-mid)", borderRadius: 2, margin: "14px auto 0" }} />
+                )}
 
                 {/* Item preview */}
                 <div style={{ padding: "24px 20px 20px", borderBottom: "0.5px solid var(--color-border)", textAlign: "center" }}>
-                  {/* Category icon */}
                   <div style={{ display: "flex", justifyContent: "center", marginBottom: 14 }}>
                     <div style={{ width: 48, height: 48, borderRadius: 14, background: `${cat?.color}18`, border: `1px solid ${cat?.color}40`, display: "flex", alignItems: "center", justifyContent: "center" }}>
                       {cat && <cat.Icon size={22} color={cat.color} strokeWidth={1.8} />}
                     </div>
                   </div>
-                  {/* Amount — prominent */}
                   <div style={{ fontSize: 30, fontWeight: 800, color: "var(--color-text-hi)", fontFamily: "var(--font-mono)", marginBottom: 4, letterSpacing: "-0.02em" }}>
                     {fmt(confirmDeleteTx.amountUSD)}
                   </div>
-                  {/* Note */}
                   {confirmDeleteTx.note && (
                     <div style={{ fontSize: 14, fontWeight: 600, color: "var(--color-text-mid)", fontFamily: "var(--font-body)", marginBottom: 3 }}>
                       {confirmDeleteTx.note}
@@ -2665,7 +2697,6 @@ export default function ApsaraSpendPage() {
                   <div style={{ fontSize: 12, color: "var(--color-text-lo)", fontFamily: "var(--font-body)", marginBottom: 14 }}>
                     {cat?.label} · {formatDisplayDate(localDateString(new Date(confirmDeleteTx.date)))}
                   </div>
-                  {/* Undo callout */}
                   <div style={{ display: "inline-flex", alignItems: "center", gap: 6, background: "var(--color-bg-page)", border: "1px solid var(--color-border)", borderRadius: 99, padding: "5px 12px" }}>
                     <div style={{ width: 6, height: 6, borderRadius: "50%", background: "#34d399", flexShrink: 0 }} />
                     <span style={{ fontSize: 11, color: "var(--color-text-lo)", fontFamily: "var(--font-body)" }}>You can undo this within 5 seconds</span>
