@@ -2298,50 +2298,45 @@ export default function ApsaraSpendPage() {
       {/* ════ GN1  FIRST-RUN ONBOARDING — 3-step tooltip overlay ════ */}
       <AnimatePresence>
         {showOnboarding && (() => {
-          const steps: { Icon: React.FC<React.SVGProps<SVGSVGElement>>, color: string, title: string, body: string, hint: string }[] = [
+          const steps = [
             {
-              Icon: CalendarDays as React.FC<React.SVGProps<SVGSVGElement>>,
-              color: "var(--accent)",
-              title: "Start with a budget",
-              body: "Set a monthly budget and every expense will track against it — you'll always know what's left.",
-              hint: "You can update your budget at any time. It's not locked in.",
+              icon: "💰",
+              title: "Set a monthly budget",
+              body: "Everything tracks against it — you'll always know what's left and when you're nearing the limit.",
+              hint: "You can update your budget at any time.",
             },
             {
-              Icon: Plus as React.FC<React.SVGProps<SVGSVGElement>>,
-              color: "var(--accent)",
-              title: "Log an expense",
-              body: "Tap Add Expense to log anything. Choose USD or KHR, pick a category, and add a note.",
-              hint: "Switch between currencies — values convert automatically.",
+              icon: "🧾",
+              title: "Log expenses easily",
+              body: "Tap Add Expense to log anything in USD or KHR. Add a note, pick a category, and you're done.",
+              hint: "Swipe any row left to edit or delete it.",
             },
             {
-              Icon: Trash2 as React.FC<React.SVGProps<SVGSVGElement>>,
-              color: "#ef4444",
-              title: "Swipe to delete",
-              body: "Swipe any expense left to reveal the Delete button. Tap a row to edit it.",
-              hint: "You have 5 seconds to undo any deletion.",
-            },
-            {
-              Icon: Settings as React.FC<React.SVGProps<SVGSVGElement>>,
-              color: "var(--color-text-lo)",
-              title: "Customise",
-              body: "Open Settings to switch themes, pick your accent colour, and set budget alert notifications.",
-              hint: "Budget mode: Soft warns, Hard requires a confirmation to go over.",
+              icon: "📅",
+              title: "Ready to start?",
+              body: "Set your budget for this month and begin tracking. It only takes a few seconds.",
+              hint: "Pick any amount — you can always adjust it later in Settings.",
             },
           ];
           const step = steps[onboardStep];
           const isLast = onboardStep === steps.length - 1;
-          const dismiss = () => {
+
+          const dismiss = (openModal = false) => {
             setShowOnboarding(false);
             localStorage.setItem("apsara_onboarded_v2", "1");
+            if (openModal) {
+              setBudgetInput("");
+              setShowBudgetModal(true);
+            }
           };
-          const StepIcon = step.Icon;
+
           return (
             <motion.div
               key="onboarding"
               initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
               transition={{ duration: 0.25 }}
               style={{ position: "fixed", inset: 0, background: "rgba(5,7,12,0.84)", zIndex: 900, display: "flex", alignItems: "flex-end", justifyContent: "center", padding: "0 12px calc(20px + env(safe-area-inset-bottom))" }}
-              onClick={dismiss}
+              onClick={() => dismiss(false)}
             >
               <motion.div
                 key={onboardStep}
@@ -2350,7 +2345,7 @@ export default function ApsaraSpendPage() {
                 style={{ background: "var(--color-bg-card)", borderRadius: 24, padding: "28px 24px 20px", width: "100%", maxWidth: 440, border: "1px solid var(--color-border-mid)" }}
                 onClick={(e) => e.stopPropagation()}
               >
-                {/* Step counter + dots */}
+                {/* Progress dots */}
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 24 }}>
                   <span style={{ fontSize: 11, fontWeight: 500, color: "var(--color-text-lo)", fontFamily: "var(--font-body)" }}>
                     {onboardStep + 1} of {steps.length}
@@ -2362,18 +2357,14 @@ export default function ApsaraSpendPage() {
                   </div>
                 </div>
 
-                {/* Icon in accent pill */}
-                <div style={{ display: "flex", justifyContent: "center", marginBottom: 20 }}>
-                  <div style={{ width: 60, height: 60, borderRadius: 18, background: step.color === "var(--accent)" ? "var(--accent-muted)" : "#ef444415", border: `1px solid ${step.color === "var(--accent)" ? "var(--accent-border)" : "#ef444435"}`, display: "flex", alignItems: "center", justifyContent: "center" }}>
-                    <StepIcon style={{ width: 26, height: 26, color: step.color, stroke: step.color }} />
-                  </div>
-                </div>
+                {/* Emoji icon */}
+                <div style={{ fontSize: 44, textAlign: "center", marginBottom: 16, lineHeight: 1 }}>{step.icon}</div>
 
                 {/* Title + body */}
                 <div style={{ fontSize: 20, fontWeight: 700, color: "var(--color-text-hi)", fontFamily: "var(--font-headline)", textAlign: "center", marginBottom: 8, letterSpacing: "-0.01em" }}>{step.title}</div>
-                <div style={{ fontSize: 14, color: "var(--color-text-lo)", fontFamily: "var(--font-body)", textAlign: "center", lineHeight: 1.65, marginBottom: 14 }}>{step.body}</div>
+                <div style={{ fontSize: 14, color: "var(--color-text-lo)", fontFamily: "var(--font-body)", textAlign: "center", lineHeight: 1.65, marginBottom: 16 }}>{step.body}</div>
 
-                {/* Hint chip */}
+                {/* Hint */}
                 <div style={{ background: "var(--color-bg-page)", border: "1px solid var(--color-border)", borderRadius: 10, padding: "8px 14px", marginBottom: 20, display: "flex", alignItems: "flex-start", gap: 8 }}>
                   <Lightbulb size={13} color="var(--color-text-lo)" strokeWidth={1.8} style={{ flexShrink: 0, marginTop: 1 }} />
                   <span style={{ fontSize: 12, color: "var(--color-text-lo)", fontFamily: "var(--font-body)", lineHeight: 1.55 }}>{step.hint}</span>
@@ -2381,15 +2372,17 @@ export default function ApsaraSpendPage() {
 
                 {/* Actions */}
                 <div style={{ display: "flex", gap: 10 }}>
-                  <button onClick={dismiss}
-                    style={{ padding: "12px 0", borderRadius: 12, border: "1px solid var(--color-border-mid)", background: "transparent", color: "var(--color-text-lo)", fontSize: 13, fontFamily: "var(--font-body)", cursor: "pointer", flex: 1 }}>
-                    Skip
-                  </button>
+                  {!isLast && (
+                    <button onClick={() => dismiss(false)}
+                      style={{ padding: "12px 0", borderRadius: 12, border: "1px solid var(--color-border-mid)", background: "transparent", color: "var(--color-text-lo)", fontSize: 13, fontFamily: "var(--font-body)", cursor: "pointer", flex: 1 }}>
+                      Skip
+                    </button>
+                  )}
                   <button
-                    onClick={() => isLast ? dismiss() : setOnboardStep((s) => s + 1)}
+                    onClick={() => isLast ? dismiss(true) : setOnboardStep((s) => s + 1)}
                     className="btn-primary"
-                    style={{ padding: "12px 0", fontSize: 14, fontFamily: "var(--font-body)", flex: 2 }}>
-                    {isLast ? "Set my budget" : "Next"}
+                    style={{ padding: "12px 0", fontSize: 14, fontFamily: "var(--font-body)", flex: isLast ? 1 : 2, display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}>
+                    {isLast ? "Set my budget →" : "Next →"}
                   </button>
                 </div>
               </motion.div>
