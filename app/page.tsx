@@ -303,8 +303,9 @@ function BudgetBar({ total, monthBudget, onSetBudget, onEditBudget }: {
         {/* F1 / A3 — edit budget: prominent CTA when over budget, subtle pencil otherwise */}
         {isOver ? (
           <button onClick={onEditBudget}
-            style={{ background: "#ef444415", border: "1px solid #ef444430", borderRadius: 6, cursor: "pointer", display: "flex", alignItems: "center", gap: 4, padding: "3px 8px" }}>
-            <span style={{ fontSize: 11, fontWeight: 700, color: "#ef4444", fontFamily: "var(--font-body)" }}>Adjust budget ›</span>
+            style={{ background: "#ef444420", border: "1px solid #ef444450", borderRadius: 8, cursor: "pointer", display: "flex", alignItems: "center", gap: 4, padding: "5px 10px" }}>
+            <span style={{ fontSize: 12, fontWeight: 700, color: "#ef4444", fontFamily: "var(--font-body)" }}>Adjust budget</span>
+            <ChevronRight size={12} color="#ef4444" strokeWidth={2.5} />
           </button>
         ) : (
           <button onClick={onEditBudget}
@@ -1523,39 +1524,78 @@ export default function ApsaraSpendPage() {
         />
       </div>
 
-      {/* ── Hairline divider + Breakdown section (only when there is data) ── */}
-      {hasBreakdown && (
-        <>
-          <div style={{ height: 1, background: "var(--color-border)", margin: "0 24px" }} />
-          <div style={{ padding: "16px 20px 24px" }}>
-            {categoryTotals.filter((c) => c.total > 0).map((c, i) => {
-              const pct = totalUSD > 0 ? (c.total / totalUSD) * 100 : 0;
-              return (
-                <motion.div key={c.id} initial={{ opacity: 0, x: -8 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: i * 0.05, duration: 0.2 }}
-                  whileHover={{ backgroundColor: `${c.color}0a` }}
-                  style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: i < categoryTotals.filter(x => x.total > 0).length - 1 ? 12 : 0, borderRadius: 10, padding: "4px 4px", marginLeft: -4, marginRight: -4 }}>
-                  <CategoryIcon cat={c} active />
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4, alignItems: "baseline" }}>
-                      <div>
-                        <span style={{ fontSize: 14, fontWeight: 600, color: "var(--color-text-mid)", fontFamily: "var(--font-body)" }}>{c.label}</span>
-                        <span style={{ fontSize: 10, color: "var(--color-text-lo)", fontFamily: "var(--font-body)", marginLeft: 6, opacity: 0.7 }}>
-                          {c.count} {c.count === 1 ? "item" : "items"}
-                        </span>
+      {/* ── Breakdown: donut chart + legend ── */}
+      {hasBreakdown && (() => {
+        const slices = categoryTotals.filter(c => c.total > 0);
+        const R = 58, r = 36, cx = 70, cy = 70; // bigger donut, wider hole
+        const total = slices.reduce((s, c) => s + c.total, 0);
+        let angle = -Math.PI / 2;
+        const gap = 0.04;
+        const paths = slices.map(c => {
+          const sweep = (c.total / total) * (Math.PI * 2) - gap;
+          const x1 = cx + R * Math.cos(angle);
+          const y1 = cy + R * Math.sin(angle);
+          const x2 = cx + R * Math.cos(angle + sweep);
+          const y2 = cy + R * Math.sin(angle + sweep);
+          const ix1 = cx + r * Math.cos(angle + sweep);
+          const iy1 = cy + r * Math.sin(angle + sweep);
+          const ix2 = cx + r * Math.cos(angle);
+          const iy2 = cy + r * Math.sin(angle);
+          const large = sweep > Math.PI ? 1 : 0;
+          const d = `M${x1},${y1} A${R},${R},0,${large},1,${x2},${y2} L${ix1},${iy1} A${r},${r},0,${large},0,${ix2},${iy2} Z`;
+          angle += sweep + gap;
+          return { ...c, d };
+        });
+        return (
+          <>
+            <div style={{ height: 1, background: "var(--color-border)", margin: "0 24px" }} />
+            <div style={{ padding: "20px 20px 24px" }}>
+
+              {/* Donut — full width, responsive via viewBox */}
+              <div style={{ width: "100%", maxWidth: 280, margin: "0 auto 20px" }}>
+                <svg width="100%" viewBox="0 0 140 140" style={{ display: "block", overflow: "visible" }}>
+                  {paths.map(p => (
+                    <path key={p.id} d={p.d} fill={p.color} opacity={0.9} />
+                  ))}
+                  {/* Centre label */}
+                  <text x={cx} y={cy - 8} textAnchor="middle" fontSize={10} fontWeight={500}
+                    fill="var(--color-text-lo)" fontFamily="var(--font-body)" letterSpacing="0.04em">TOTAL</text>
+                  <text x={cx} y={cy + 8} textAnchor="middle" fontSize={14} fontWeight={700}
+                    fill="var(--color-text-hi)" fontFamily="var(--font-mono)">{fmt(totalUSD)}</text>
+                </svg>
+              </div>
+
+              {/* Legend — full width rows */}
+              <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                {slices.map(c => {
+                  const pct = Math.round((c.total / total) * 100);
+                  const barW = `${pct}%`;
+                  return (
+                    <div key={c.id}>
+                      {/* Label row */}
+                      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 4 }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
+                          <div style={{ width: 8, height: 8, borderRadius: "50%", background: c.color, flexShrink: 0 }} />
+                          <span style={{ fontSize: 12, fontWeight: 500, color: "var(--color-text-mid)", fontFamily: "var(--font-body)" }}>{c.label}</span>
+                          <span style={{ fontSize: 11, color: "var(--color-text-lo)", fontFamily: "var(--font-body)" }}>{pct}%</span>
+                        </div>
+                        <span style={{ fontSize: 12, fontWeight: 700, color: c.color, fontFamily: "var(--font-mono)" }}>{fmt(c.total)}</span>
                       </div>
-                      <span style={{ fontSize: 13, fontWeight: 700, color: c.color, fontFamily: "var(--font-mono)" }}>{fmt(c.total)}</span>
+                      {/* Mini progress bar */}
+                      <div style={{ height: 3, background: "var(--color-bg-nav)", borderRadius: 99, overflow: "hidden" }}>
+                        <motion.div animate={{ width: barW }} initial={{ width: 0 }}
+                          transition={{ duration: 0.45, ease: [0.4, 0, 0.2, 1] }}
+                          style={{ height: "100%", background: c.color, borderRadius: 99 }} />
+                      </div>
                     </div>
-                    <div style={{ background: "var(--color-bg-page)", borderRadius: 999, height: 4, overflow: "hidden" }}>
-                      <motion.div animate={{ width: `${pct}%` }} transition={{ duration: 0.45, ease: [0.4, 0, 0.2, 1] }}
-                        style={{ height: "100%", background: c.color, borderRadius: 999 }} />
-                    </div>
-                  </div>
-                </motion.div>
-              );
-            })}
-          </div>
-        </>
-      )}
+                  );
+                })}
+              </div>
+
+            </div>
+          </>
+        );
+      })()}
     </div>
   );
 
@@ -1599,95 +1639,46 @@ export default function ApsaraSpendPage() {
   );
 
   const TransactionList = hasData ? (
-    <div style={{ background: "var(--color-bg-card)", borderRadius: 22, padding: "24px 20px", border: "1px solid var(--color-border)", display: "flex", flexDirection: "column" }}>
+    <div style={{ background: "var(--color-bg-card)", borderRadius: 22, padding: "20px 20px 24px", border: "1px solid var(--color-border)", display: "flex", flexDirection: "column" }}>
 
-      {/* ── Filter row — right-aligned, no redundant count label ── */}
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", marginBottom: 16 }}>
-        <div style={{ position: "relative" }}>
-          <button
-            aria-label="Filter by category"
-            onClick={() => setShowFilterMenu((v) => !v)}
-            style={{
-              display: "flex", alignItems: "center", gap: 6,
-              background: filterCategory !== "all" ? "var(--color-bg-deep)" : "var(--color-bg-nav)",
-              border: filterCategory !== "all" ? "1px solid var(--color-border-mid)" : "1px solid var(--color-border-mid)",
-              borderRadius: 8, padding: "5px 10px",
-              cursor: "pointer", transition: "all 0.15s",
-            }}
-          >
-            {filterCategory !== "all" && activeCat && (
-              <activeCat.Icon
-                size={12}
-                color="var(--color-text-hi)"
-                strokeWidth={2}
-              />
-            )}
-            <span style={{ fontSize: 11, fontWeight: 600, color: "var(--color-text-hi)", fontFamily: "var(--font-body)", letterSpacing: "0.04em" }}>
-              {filterCategory === "all" ? "All" : activeCat?.label}
-            </span>
-            <ChevronDown
-              size={11}
-              color="var(--color-text-lo)"
-              strokeWidth={2.5}
-              style={{ transition: "transform 0.15s", transform: showFilterMenu ? "rotate(180deg)" : "rotate(0deg)" }}
-            />
-          </button>
-
-          {/* ── Dropdown overlay ── */}
-          <AnimatePresence>
-            {showFilterMenu && (
-              <motion.div
-                initial={{ opacity: 0, y: -6, scale: 0.96 }}
-                animate={{ opacity: 1, y: 0, scale: 1 }}
-                exit={{ opacity: 0, y: -6, scale: 0.96 }}
-                transition={{ duration: 0.14, ease: [0.4, 0, 0.2, 1] }}
-                style={{
-                  position: "absolute", top: "calc(100% + 6px)", right: 0,
-                  background: "var(--color-bg-nav)", border: "1px solid var(--color-border-mid)",
-                  borderRadius: 12, padding: "6px", zIndex: 100,
-                  minWidth: 148, boxShadow: "0 8px 24px rgba(0,0,0,0.15)",
-                }}
-              >
-                {/* All option */}
-                <button
-                  onClick={() => { setFilterCategory("all"); setShowFilterMenu(false); }}
-                  style={{
-                    width: "100%", display: "flex", alignItems: "center", gap: 8,
-                    padding: "8px 10px", borderRadius: 8, border: "none",
-                    background: filterCategory === "all" ? "var(--color-border)" : "transparent",
-                    cursor: "pointer", transition: "background 0.12s",
-                  }}
-                >
-                  <span style={{ fontSize: 13, fontWeight: filterCategory === "all" ? 600 : 400, color: "var(--color-text-hi)", fontFamily: "var(--font-body)" }}>
-                    All categories
-                  </span>
-                </button>
-
-                {/* Divider */}
-                <div style={{ height: 1, background: "var(--color-border-mid)", margin: "4px 0" }} />
-
-                {/* Category options — only show categories that have entries */}
-                {CATEGORIES.filter((c) => monthTxs.some((t) => t.category === c.id)).map((c) => (
-                  <button
-                    key={c.id}
-                    onClick={() => { setFilterCategory(c.id); setShowFilterMenu(false); }}
-                    style={{
-                      width: "100%", display: "flex", alignItems: "center", gap: 8,
-                      padding: "8px 10px", borderRadius: 8, border: "none",
-                      background: filterCategory === c.id ? `${c.color}18` : "transparent",
-                      cursor: "pointer", transition: "background 0.12s",
-                    }}
-                  >
-                    <c.Icon size={14} color={c.color} strokeWidth={1.8} />
-                    <span style={{ fontSize: 13, fontWeight: filterCategory === c.id ? 600 : 400, color: filterCategory === c.id ? c.color : "var(--color-text-lo)", fontFamily: "var(--font-body)" }}>
-                      {c.label}
-                    </span>
-                  </button>
-                ))}
-              </motion.div>
-            )}
-          </AnimatePresence>
-        </div>
+      {/* ── Filter chips — horizontal scroll, one-tap ── */}
+      <div style={{ display: "flex", gap: 6, marginBottom: 16, overflowX: "auto", paddingBottom: 2, scrollbarWidth: "none" }}>
+        {/* All chip */}
+        <button
+          onClick={() => setFilterCategory("all")}
+          style={{
+            flexShrink: 0, display: "flex", alignItems: "center", gap: 5,
+            padding: "5px 12px", borderRadius: 99,
+            border: filterCategory === "all" ? "none" : "1px solid var(--color-border-mid)",
+            background: filterCategory === "all" ? "var(--accent)" : "var(--color-bg-nav)",
+            color: filterCategory === "all" ? "var(--accent-text)" : "var(--color-text-lo)",
+            fontSize: 12, fontWeight: 600, fontFamily: "var(--font-body)",
+            cursor: "pointer", transition: "all 0.15s",
+            whiteSpace: "nowrap",
+          }}>
+          All
+        </button>
+        {/* Category chips — only for categories with entries */}
+        {CATEGORIES.filter(c => monthTxs.some(t => t.category === c.id)).map(c => {
+          const active = filterCategory === c.id;
+          return (
+            <button key={c.id}
+              onClick={() => setFilterCategory(active ? "all" : c.id)}
+              style={{
+                flexShrink: 0, display: "flex", alignItems: "center", gap: 5,
+                padding: "5px 10px", borderRadius: 99,
+                border: active ? "none" : "1px solid var(--color-border-mid)",
+                background: active ? c.color : "var(--color-bg-nav)",
+                color: active ? "#fff" : "var(--color-text-lo)",
+                fontSize: 12, fontWeight: active ? 600 : 400, fontFamily: "var(--font-body)",
+                cursor: "pointer", transition: "all 0.15s",
+                whiteSpace: "nowrap",
+              }}>
+              <c.Icon size={11} color={active ? "#fff" : c.color} strokeWidth={2} />
+              {c.label}
+            </button>
+          );
+        })}
       </div>
 
       {/* ── Transaction rows (filtered) ── */}
@@ -2180,7 +2171,9 @@ export default function ApsaraSpendPage() {
           bottom: calc(var(--sp-8) + env(safe-area-inset-bottom));
           right: var(--sp-5);
           z-index: 50;
-          /* No background container — button floats directly */
+          display: flex;
+          flex-direction: column;
+          align-items: flex-end;
         }
         .fab-btn {
           /* Pill shape on mobile: icon + label */
@@ -2544,7 +2537,7 @@ export default function ApsaraSpendPage() {
             dragConstraints={{ left: 0, right: 0 }}
             dragElastic={0.12}
             onDragEnd={handleDragEnd}
-            onClick={() => { showFilterMenu && setShowFilterMenu(false); openSwipeId && setOpenSwipeId(null); }}
+            onClick={() => { openSwipeId && setOpenSwipeId(null); }}
             style={{ touchAction: "pan-y", cursor: "grab" }}>
             <AnimatePresence mode="wait" custom={swipeDir}>
               <motion.div key={selectedMonth} custom={swipeDir} variants={slideVariants}
@@ -2641,52 +2634,33 @@ export default function ApsaraSpendPage() {
           )}
           </motion.div>
         </div>{/* end main-scroll */}
-        {isLoaded && hasMonthBudget && (
+        {isLoaded && hasMonthBudget && !fabDisabled && (
         <div className="fab-footer">
-        <motion.button
-          whileTap={{ scale: fabDisabled ? 1 : 0.94 }}
-          whileHover={{ scale: fabDisabled ? 1 : 1.04 }}
-          aria-label={fabDisabled ? "Monthly budget reached — cannot add more expenses" : "Add new expense"}
-          aria-disabled={fabDisabled}
-          onClick={() => {
-            if (fabDisabled) {
-              showToast("Budget limit reached.", "warn");
-              return;
-            }
-            setEditTx(null);
-            setShowModal(true);
-          }}
-          className="fab-btn"
-          style={{
-            background: fabDisabled
-              ? "var(--color-bg-nav)"
-              : "linear-gradient(135deg, var(--accent) 0%, var(--accent-dim) 100%)",
-            color: fabDisabled ? "var(--color-text-lo)" : "var(--accent-text)",
-            border: fabDisabled ? "1px solid var(--color-border-mid)" : "none",
-            borderRadius: 16,
-            padding: "14px 22px",
-            cursor: fabDisabled ? "not-allowed" : "pointer",
-            display: "flex", alignItems: "center", justifyContent: "center",
-            gap: 8, letterSpacing: "0.03em",
-            fontFamily: "var(--font-headline)",
-            fontSize: 15, fontWeight: 700,
-            animation: fabDisabled ? "none" : "pulseGlow 3s ease-in-out infinite",
-            minHeight: 52,
-            opacity: fabDisabled ? 0.7 : 1,
-            boxShadow: fabDisabled
-              ? "0 2px 8px rgba(0,0,0,0.12)"
-              : "0 8px 28px rgba(0,0,0,0.28), 0 2px 8px rgba(0,0,0,0.16)",
-            transition: "background 0.25s, color 0.25s, opacity 0.25s, box-shadow 0.25s",
-          }}>
-          <Plus size={18} color={fabDisabled ? "var(--color-text-lo)" : "var(--accent-text)"} strokeWidth={3} />
-          {fabDisabled ? "Budget Reached" : "Add Expense"}
-        </motion.button>
-        {/* FA2 — persistent caption under the FAB when budget is hit */}
-        {fabDisabled && (
-          <div style={{ textAlign: "center", marginTop: 6, fontSize: 10, color: "var(--color-text-lo)", fontFamily: "var(--font-body)", letterSpacing: "0.04em" }}>
-            Monthly limit reached · adjust budget to continue
-          </div>
-        )}
+          <motion.button
+            whileTap={{ scale: 0.94 }}
+            whileHover={{ scale: 1.04 }}
+            aria-label="Add new expense"
+            onClick={() => { setEditTx(null); setShowModal(true); }}
+            className="fab-btn"
+            style={{
+              background: "linear-gradient(135deg, var(--accent) 0%, var(--accent-dim) 100%)",
+              color: "var(--accent-text)",
+              border: "none",
+              borderRadius: 16,
+              padding: "14px 22px",
+              cursor: "pointer",
+              display: "flex", alignItems: "center", justifyContent: "center",
+              gap: 8, letterSpacing: "0.03em",
+              fontFamily: "var(--font-headline)",
+              fontSize: 15, fontWeight: 700,
+              animation: "pulseGlow 3s ease-in-out infinite",
+              minHeight: 52,
+              boxShadow: "0 8px 28px rgba(0,0,0,0.28), 0 2px 8px rgba(0,0,0,0.16)",
+              transition: "background 0.25s, box-shadow 0.25s",
+            }}>
+            <Plus size={18} color="var(--accent-text)" strokeWidth={3} />
+            Add Expense
+          </motion.button>
         </div>
         )}{/* end FAB gate */}
 
