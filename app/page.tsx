@@ -1524,78 +1524,38 @@ export default function ApsaraSpendPage() {
         />
       </div>
 
-      {/* ── Breakdown: donut chart + legend ── */}
-      {hasBreakdown && (() => {
-        const slices = categoryTotals.filter(c => c.total > 0);
-        const R = 58, r = 36, cx = 70, cy = 70; // bigger donut, wider hole
-        const total = slices.reduce((s, c) => s + c.total, 0);
-        let angle = -Math.PI / 2;
-        const gap = 0.04;
-        const paths = slices.map(c => {
-          const sweep = (c.total / total) * (Math.PI * 2) - gap;
-          const x1 = cx + R * Math.cos(angle);
-          const y1 = cy + R * Math.sin(angle);
-          const x2 = cx + R * Math.cos(angle + sweep);
-          const y2 = cy + R * Math.sin(angle + sweep);
-          const ix1 = cx + r * Math.cos(angle + sweep);
-          const iy1 = cy + r * Math.sin(angle + sweep);
-          const ix2 = cx + r * Math.cos(angle);
-          const iy2 = cy + r * Math.sin(angle);
-          const large = sweep > Math.PI ? 1 : 0;
-          const d = `M${x1},${y1} A${R},${R},0,${large},1,${x2},${y2} L${ix1},${iy1} A${r},${r},0,${large},0,${ix2},${iy2} Z`;
-          angle += sweep + gap;
-          return { ...c, d };
-        });
-        return (
-          <>
-            <div style={{ height: 1, background: "var(--color-border)", margin: "0 24px" }} />
-            <div style={{ padding: "20px 20px 24px" }}>
-
-              {/* Donut — full width, responsive via viewBox */}
-              <div style={{ width: "100%", maxWidth: 280, margin: "0 auto 20px" }}>
-                <svg width="100%" viewBox="0 0 140 140" style={{ display: "block", overflow: "visible" }}>
-                  {paths.map(p => (
-                    <path key={p.id} d={p.d} fill={p.color} opacity={0.9} />
-                  ))}
-                  {/* Centre label */}
-                  <text x={cx} y={cy - 8} textAnchor="middle" fontSize={10} fontWeight={500}
-                    fill="var(--color-text-lo)" fontFamily="var(--font-body)" letterSpacing="0.04em">TOTAL</text>
-                  <text x={cx} y={cy + 8} textAnchor="middle" fontSize={14} fontWeight={700}
-                    fill="var(--color-text-hi)" fontFamily="var(--font-mono)">{fmt(totalUSD)}</text>
-                </svg>
-              </div>
-
-              {/* Legend — full width rows */}
-              <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-                {slices.map(c => {
-                  const pct = Math.round((c.total / total) * 100);
-                  const barW = `${pct}%`;
-                  return (
-                    <div key={c.id}>
-                      {/* Label row */}
-                      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 4 }}>
-                        <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
-                          <div style={{ width: 8, height: 8, borderRadius: "50%", background: c.color, flexShrink: 0 }} />
-                          <span style={{ fontSize: 12, fontWeight: 500, color: "var(--color-text-mid)", fontFamily: "var(--font-body)" }}>{c.label}</span>
-                          <span style={{ fontSize: 11, color: "var(--color-text-lo)", fontFamily: "var(--font-body)" }}>{pct}%</span>
-                        </div>
-                        <span style={{ fontSize: 12, fontWeight: 700, color: c.color, fontFamily: "var(--font-mono)" }}>{fmt(c.total)}</span>
+      {/* ── Breakdown: category rows ── */}
+      {hasBreakdown && (
+        <>
+          <div style={{ height: 1, background: "var(--color-border)", margin: "0 24px" }} />
+          <div style={{ padding: "16px 20px 24px" }}>
+            {categoryTotals.filter((c) => c.total > 0).map((c, i) => {
+              const pct = totalUSD > 0 ? (c.total / totalUSD) * 100 : 0;
+              return (
+                <motion.div key={c.id} initial={{ opacity: 0, x: -8 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: i * 0.05, duration: 0.2 }}
+                  style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: i < categoryTotals.filter(x => x.total > 0).length - 1 ? 12 : 0 }}>
+                  <CategoryIcon cat={c} active />
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4, alignItems: "baseline" }}>
+                      <div>
+                        <span style={{ fontSize: 14, fontWeight: 600, color: "var(--color-text-mid)", fontFamily: "var(--font-body)" }}>{c.label}</span>
+                        <span style={{ fontSize: 10, color: "var(--color-text-lo)", fontFamily: "var(--font-body)", marginLeft: 6, opacity: 0.7 }}>
+                          {c.count} {c.count === 1 ? "item" : "items"}
+                        </span>
                       </div>
-                      {/* Mini progress bar */}
-                      <div style={{ height: 3, background: "var(--color-bg-nav)", borderRadius: 99, overflow: "hidden" }}>
-                        <motion.div animate={{ width: barW }} initial={{ width: 0 }}
-                          transition={{ duration: 0.45, ease: [0.4, 0, 0.2, 1] }}
-                          style={{ height: "100%", background: c.color, borderRadius: 99 }} />
-                      </div>
+                      <span style={{ fontSize: 13, fontWeight: 700, color: c.color, fontFamily: "var(--font-mono)" }}>{fmt(c.total)}</span>
                     </div>
-                  );
-                })}
-              </div>
-
-            </div>
-          </>
-        );
-      })()}
+                    <div style={{ background: "var(--color-bg-nav)", borderRadius: 999, height: 4, overflow: "hidden" }}>
+                      <motion.div animate={{ width: `${pct}%` }} transition={{ duration: 0.45, ease: [0.4, 0, 0.2, 1] }}
+                        style={{ height: "100%", background: c.color, borderRadius: 999 }} />
+                    </div>
+                  </div>
+                </motion.div>
+              );
+            })}
+          </div>
+        </>
+      )}
     </div>
   );
 
