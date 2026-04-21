@@ -500,15 +500,20 @@ function EntryModal({ tx, selectedMonth, monthBalance, totalUSD: currentTotal, c
   const dateInputRef = useRef<HTMLInputElement>(null);
   const modalRef     = useRef<HTMLDivElement>(null);
 
+  const [amtReadOnly, setAmtReadOnly] = useState(true); // Mobile keyboard trick: readOnly prevents early-focus suppression
+
   useEffect(() => {
-    setTimeout(() => {
+    // Step 1: remove readOnly so the input becomes interactive
+    setAmtReadOnly(false);
+    // Step 2: after readOnly is removed, focus + cursor to end
+    const t = setTimeout(() => {
       const el = amountRef.current;
       if (!el) return;
       el.focus();
-      // Move cursor to end of any pre-filled value
       const len = el.value.length;
       el.setSelectionRange(len, len);
-    }, 120);
+    }, 80);
+    return () => clearTimeout(t);
   }, []);
   useFocusTrap(modalRef, true);
 
@@ -677,6 +682,7 @@ function EntryModal({ tx, selectedMonth, monthBalance, totalUSD: currentTotal, c
             ref={amountRef}
             type="text"
             inputMode={currency === "KHR" ? "numeric" : "decimal"}
+            readOnly={amtReadOnly}
             value={currency === "KHR" ? formatKHRDisplay(rawAmount) : rawAmount}
             onChange={(e) =>
               currency === "KHR"
@@ -1001,7 +1007,6 @@ export default function ApsaraSpendPage() {
   const [showSettings,     setShowSettings]     = useState(false);
   const [resetConfirm,     setResetConfirm]     = useState(false);
   const [toast,            setToast]            = useState<Toast | null>(null);
-  const [toastProgress,    setToastProgress]    = useState(100); // countdown bar 100→0%
   // L1 — category filter for the Entries list; resets whenever the month changes
   const [filterCategory,   setFilterCategory]   = useState<CategoryId | "all">("all");
   const [showFilterMenu,   setShowFilterMenu]   = useState(false);
@@ -1074,16 +1079,6 @@ export default function ApsaraSpendPage() {
   const showToast = useCallback((msg: string, type: Toast["type"] = "info", undoFn?: () => void) => {
     const duration = undoFn ? 5000 : 3500;
     setToast({ msg, type, undoFn });
-    setToastProgress(100);
-    // Animate countdown bar from 100→0 over the toast duration
-    const start = performance.now();
-    const tick = () => {
-      const elapsed = performance.now() - start;
-      const pct = Math.max(0, 100 - (elapsed / duration) * 100);
-      setToastProgress(pct);
-      if (pct > 0) requestAnimationFrame(tick);
-    };
-    requestAnimationFrame(tick);
     setTimeout(() => setToast(null), duration);
   }, []);
 
@@ -1400,20 +1395,35 @@ export default function ApsaraSpendPage() {
   };
 
   const handleResetMonth = () => {
+    // Snapshot deleted data before wiping so Undo can restore
+    const deletedTxs = data.transactions.filter((t) => {
+      const dt = new Date(t.date);
+      return toMonthKey(dt.getFullYear(), dt.getMonth() + 1) === selectedMonth;
+    });
+    const deletedBalance = data.monthlyBalances[selectedMonth];
+
     setData((d) => {
-      // Remove transactions for this month
       const transactions = d.transactions.filter((t) => {
         const dt = new Date(t.date);
         return toMonthKey(dt.getFullYear(), dt.getMonth() + 1) !== selectedMonth;
       });
-      // Remove budget for this month — returns to InitScreen
       const monthlyBalances = { ...d.monthlyBalances };
       delete monthlyBalances[selectedMonth];
       return { ...d, transactions, monthlyBalances };
     });
     setResetConfirm(false);
     setShowSettings(false);
-    showToast(`${MONTH_FULL[month - 1]} reset.`, "warn");
+    showToast(`${MONTH_FULL[month - 1]} reset.`, "warn", () => {
+      // Undo: restore deleted transactions and budget
+      setData((d) => ({
+        ...d,
+        transactions: [...deletedTxs, ...d.transactions],
+        monthlyBalances: deletedBalance
+          ? { ...d.monthlyBalances, [selectedMonth]: deletedBalance }
+          : d.monthlyBalances,
+      }));
+      showToast("Reset undone.", "success");
+    });
   };
 
   // A1 — Flexible budget engine: budget can be set OR updated at any time.
@@ -1601,8 +1611,14 @@ export default function ApsaraSpendPage() {
   const TransactionList = hasData ? (
     <div style={{ background: "var(--color-bg-card)", borderRadius: 22, padding: "20px 20px 24px", border: "1px solid var(--color-border)", display: "flex", flexDirection: "column" }}>
 
-      {/* ── Filter chips — horizontal scroll, one-tap ── */}
-      <div style={{ display: "flex", gap: 6, marginBottom: 16, overflowX: "auto", paddingBottom: 2, scrollbarWidth: "none" }}>
+      {/* ── Filter chips — horizontal scroll. onPointerDownCapture stops propagation
+           to the parent motion.div drag handler so scrolling chips doesn't trigger
+           month navigation — both gestures coexist independently ── */}
+      <div
+        style={{ display: "flex", gap: 6, marginBottom: 16, overflowX: "auto", paddingBottom: 2, scrollbarWidth: "none", WebkitOverflowScrolling: "touch", touchAction: "pan-x" }}
+        onPointerDownCapture={(e) => e.stopPropagation()}
+        onTouchStartCapture={(e) => e.stopPropagation()}
+      >
         {/* All chip */}
         <button
           onClick={() => setFilterCategory("all")}
@@ -1923,7 +1939,6 @@ export default function ApsaraSpendPage() {
           --toast-info-border: #1d4ed8;
           --toast-info-text:   #bfdbfe;
           --toast-shadow:      0 8px 32px rgba(0,0,0,0.6);
-          --toast-bar-track:   rgba(255,255,255,0.08);
         }
         /* ── T1  Light mode: Slate-50 bg, Slate-900 text (WCAG AA) ──────── */
         html[data-theme="light"] {
@@ -1949,7 +1964,6 @@ export default function ApsaraSpendPage() {
           --toast-info-border: #3b82f6;
           --toast-info-text:   #1e40af;
           --toast-shadow:      0 2px 12px rgba(0,0,0,0.08), 0 1px 4px rgba(0,0,0,0.06);
-          --toast-bar-track:   rgba(0,0,0,0.08);
         }
         html[data-theme="light"], html[data-theme="light"] body {
           background: var(--color-bg-page);
@@ -3008,17 +3022,6 @@ export default function ApsaraSpendPage() {
                   </button>
                 )}
               </div>
-              {/* Countdown bar */}
-              {toast.undoFn && (
-                <div style={{ height: 2, background: "var(--toast-bar-track)", overflow: "hidden", borderRadius: "0 0 14px 14px" }}>
-                  <div style={{
-                    height: "100%",
-                    width: `${toastProgress}%`,
-                    background: toast.type === "warn" ? "var(--toast-warn-border)" : "var(--toast-ok-border)",
-                    transition: "width 0.1s linear",
-                  }} />
-                </div>
-              )}
             </motion.div>
           )}
         </AnimatePresence>
