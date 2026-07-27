@@ -7,7 +7,7 @@ import {
   UtensilsCrossed, Bike, Zap, Users, ShoppingBag, MoreHorizontal,
   CalendarDays, Lightbulb, Lock, Check, AlertTriangle, Circle, Pencil, Receipt,
   Download, FileText,
-  Cloud, CloudOff, UploadCloud, RefreshCw,
+  Cloud, CloudOff, UploadCloud, RefreshCw, ArrowDown,
   type LucideIcon,
 } from "lucide-react";
 
@@ -18,6 +18,7 @@ import {
 import type { Currency, CategoryId, Transaction, AppData } from "@/lib/types";
 import { useSyncedLedger, newTransactionId, type SyncStatus, type SyncResult } from "@/lib/ledger/useSyncedLedger";
 import { downloadBackupJson, downloadCsv } from "@/lib/ledger/export";
+import { usePullToRefresh } from "@/lib/usePullToRefresh";
 
 // Use the official LucideIcon type so Lucide component props align exactly
 type IconComp   = LucideIcon;
@@ -1240,10 +1241,17 @@ export default function ApsaraSpendPage() {
   useEffect(() => {
     const anyOpen = showModal || showSettings || showPicker || showBudgetModal;
     const nobudget = !(selectedMonth in data.monthlyBalances && data.monthlyBalances[selectedMonth] > 0);
-    const initActive = isLoaded && nobudget;
+    // Recomputed here rather than reusing monthTxs, which is declared below —
+    // the dependency array is evaluated during render, so referencing it would
+    // hit the temporal dead zone.
+    const monthHasTxs = data.transactions.some((t) => {
+      const d = new Date(t.date);
+      return toMonthKey(d.getFullYear(), d.getMonth() + 1) === selectedMonth;
+    });
+    const initActive = isLoaded && nobudget && !monthHasTxs;
     document.body.style.overflow = (anyOpen || initActive) ? "hidden" : "";
     return () => { document.body.style.overflow = ""; };
-  }, [showModal, showSettings, showPicker, showBudgetModal, isLoaded, selectedMonth, data.monthlyBalances]);
+  }, [showModal, showSettings, showPicker, showBudgetModal, isLoaded, selectedMonth, data.monthlyBalances, data.transactions]);
 
   // ── Derived ──────────────────────────────────────────────────────────────────
   // E2: useMemo — these are the most expensive derivations in the component.
@@ -1494,6 +1502,43 @@ export default function ApsaraSpendPage() {
 
   // S1 — Budget gate: dashboard shows when any balance exists (> 0)
   const hasMonthBudget = (selectedMonth in data.monthlyBalances && data.monthlyBalances[selectedMonth] > 0);
+
+  // The gate asks "has this month been set up yet?", and a month holding
+  // expenses has been, budget or not. Keying it on the budget alone meant a
+  // month whose budget was missing — dropped by a bad sync, or simply never set
+  // on this device — rendered the set-your-budget screen *instead of* the
+  // expenses, which reads as "my records are gone". BudgetBar already handles a
+  // zero budget with its own "Set budget" prompt, so nothing is lost by showing
+  // the dashboard here.
+  const showDashboard = hasMonthBudget || monthTxs.length > 0;
+
+  // ── Pull to refresh ───────────────────────────────────────────────────────
+  // Reconciles whichever month is on screen with the server. It runs the same
+  // round trip as the sync pill — push pending, then adopt server state — so a
+  // pull on July also picks up anything another device wrote to April. The
+  // ledger endpoint returns every month in one shot; there is nothing
+  // month-scoped to fetch.
+  //
+  // Off while a modal owns the screen (body scroll is locked there, so the
+  // gesture would read as a pull from the top when it isn't) and off behind the
+  // budget gate, where the InitScreen is the only thing rendered and there is
+  // no ledger to refresh yet.
+  const pullEnabled =
+    isLoaded && showDashboard &&
+    !showModal && !showSettings && !showPicker && !showBudgetModal && !confirmDeleteTx;
+
+  const {
+    ref: pullRef,
+    distance: pullDistance,
+    phase: pullPhase,
+    progress: pullProgress,
+    dragging: pullDragging,
+  } = usePullToRefresh<HTMLElement>({ onRefresh: handleSyncNow, enabled: pullEnabled });
+
+  const pullLabel =
+    pullPhase === "refreshing" ? "REFRESHING…"
+    : pullPhase === "armed"    ? "RELEASE TO REFRESH"
+                               : "PULL TO REFRESH";
 
   // A1/A2 — Save OR update the budget for selectedMonth.
   // No immutability lock — user can revise at any time (satisfies User 1).
@@ -2461,6 +2506,7 @@ export default function ApsaraSpendPage() {
       </AnimatePresence>
 
       <main className="main-wrap"
+        ref={pullRef}
         style={{
           fontFamily: "var(--font-body)",
           background: "var(--color-bg-page)",
@@ -2560,7 +2606,54 @@ export default function ApsaraSpendPage() {
 
           </div>{/* end .sticky-header */}
 
+          {/* ════ PULL TO REFRESH ════ */}
+          {/* The indicator lives in the gap the content is pushed down to open,
+              so it is revealed rather than overlaid. Height 0 at rest means it
+              occupies nothing and the layout below is byte-identical to before. */}
+          <div style={{ position: "relative" }}>
+            <div
+              aria-hidden={pullDistance === 0}
+              style={{
+                position: "absolute", top: 0, left: 0, right: 0,
+                height: pullDistance,
+                display: "flex", alignItems: "center", justifyContent: "center",
+                overflow: "hidden", pointerEvents: "none",
+                opacity: Math.min(1, pullProgress * 1.6),
+                transition: pullDragging ? "none" : "height 0.32s cubic-bezier(0.4,0,0.2,1), opacity 0.32s",
+              }}
+            >
+              <div style={{
+                display: "flex", alignItems: "center", gap: 7,
+                fontSize: 10, fontWeight: 600, letterSpacing: "0.1em",
+                fontFamily: "var(--font-body)", whiteSpace: "nowrap",
+                color: pullPhase === "armed" ? "var(--accent)" : "var(--color-text-lo)",
+                transition: "color 0.18s",
+              }}>
+                {pullPhase === "refreshing" ? (
+                  <motion.span
+                    animate={{ rotate: 360 }}
+                    transition={{ repeat: Infinity, duration: 0.9, ease: "linear" }}
+                    style={{ display: "inline-flex" }}>
+                    <RefreshCw size={13} strokeWidth={2.4} />
+                  </motion.span>
+                ) : (
+                  // Flips to point up as the pull arms — the arrow itself is the
+                  // progress meter, so no separate ring or bar is needed.
+                  <span style={{ display: "inline-flex", transform: `rotate(${pullProgress * 180}deg)` }}>
+                    <ArrowDown size={13} strokeWidth={2.4} />
+                  </span>
+                )}
+                {pullLabel}
+              </div>
+            </div>
+
           {/* ════ SWIPEABLE DASHBOARD — horizontal drag navigates months ════ */}
+          {/* translateY only while pulling: at rest there is no transform at all,
+              so this never becomes a containing block for fixed descendants. */}
+          <div style={{
+            transform: pullDistance > 0 ? `translateY(${pullDistance}px)` : undefined,
+            transition: pullDragging ? "none" : "transform 0.32s cubic-bezier(0.4,0,0.2,1)",
+          }}>
           <motion.div
             drag="x"
             dragConstraints={{ left: 0, right: 0 }}
@@ -2634,8 +2727,8 @@ export default function ApsaraSpendPage() {
                       ))}
                     </div>
                   </div>
-                ) : !hasMonthBudget ? (
-                  // S3 — No budget set: show the Initialize Screen gate
+                ) : !showDashboard ? (
+                  // S3 — Nothing recorded for this month yet: show the Initialize Screen gate
                   <div className="dash-pad" style={{ display: "flex", flexDirection: "column" }}>
                     {InitScreen}
                   </div>
@@ -2662,6 +2755,8 @@ export default function ApsaraSpendPage() {
           </div>
           )}
           </motion.div>
+          </div>{/* end pull-to-refresh translate */}
+          </div>{/* end pull-to-refresh wrapper */}
         </div>{/* end main-scroll */}
         {isLoaded && hasMonthBudget && !fabDisabled && (
         <div className="fab-footer">
