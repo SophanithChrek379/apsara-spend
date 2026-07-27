@@ -1,10 +1,12 @@
 import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
 import type { User, SupabaseClient } from "@supabase/supabase-js";
-import { createClient } from "@/utils/supabase/server";
+import { createClient, isSupabaseConfigured } from "@/utils/supabase/server";
 import { ValidationError } from "@/lib/validation";
 
 export class AuthError extends Error {}
+/** Env vars absent — a deployment problem, not a client problem. */
+export class ConfigError extends Error {}
 
 /**
  * Resolves the caller from the Supabase auth cookie. Anonymous users are real
@@ -18,6 +20,11 @@ export const requireUser = async (): Promise<{
   supabase: SupabaseClient;
   user: User;
 }> => {
+  if (!isSupabaseConfigured()) {
+    throw new ConfigError(
+      "NEXT_PUBLIC_SUPABASE_URL / NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY are not set",
+    );
+  }
   const cookieStore = await cookies();
   const supabase = createClient(cookieStore);
   const { data, error } = await supabase.auth.getUser();
@@ -38,6 +45,12 @@ export const route = <Ctx>(
   try {
     return await fn(req, ctx);
   } catch (err) {
+    if (err instanceof ConfigError) {
+      // 503, not 500: the server is reachable but not configured. Logged in
+      // full so the cause is obvious in the deployment logs.
+      console.error("[api] misconfigured:", err.message);
+      return NextResponse.json({ error: "Server not configured" }, { status: 503 });
+    }
     if (err instanceof AuthError) {
       return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
     }

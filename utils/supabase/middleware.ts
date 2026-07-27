@@ -4,6 +4,8 @@ import { type NextRequest, NextResponse } from "next/server";
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
 
+let warnedMissingEnv = false;
+
 export const createClient = async (request: NextRequest) => {
   // Create an unmodified response
   let supabaseResponse = NextResponse.next({
@@ -12,9 +14,23 @@ export const createClient = async (request: NextRequest) => {
     },
   });
 
+  // Fail open. This runs on EVERY matched request, so throwing here takes the
+  // entire site down with a 500 — including the homepage, which needs no auth
+  // at all. A missing env var should cost you session refresh, not the app.
+  if (!supabaseUrl || !supabaseKey) {
+    if (!warnedMissingEnv) {
+      warnedMissingEnv = true;
+      console.error(
+        "[proxy] NEXT_PUBLIC_SUPABASE_URL / NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY are not set — " +
+        "skipping session refresh. The app will run in cache-only mode.",
+      );
+    }
+    return supabaseResponse;
+  }
+
   const supabase = createServerClient(
-    supabaseUrl!,
-    supabaseKey!,
+    supabaseUrl,
+    supabaseKey,
     {
       cookies: {
         getAll() {
