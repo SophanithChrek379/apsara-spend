@@ -16,6 +16,15 @@ import { SCHEMA_VERSION, STORAGE_KEY } from "@/lib/constants";
 
 const SNAPSHOT_KEY = `${STORAGE_KEY}__synced`;
 
+/**
+ * The uid the two slots above belong to. Anonymous identities are per-browser
+ * and can be replaced (cookies cleared, refresh token revoked), and the new
+ * identity owns nothing server-side. Without this we cannot tell "the server
+ * says you have no expenses" from "you are now a different user" — and the two
+ * demand opposite handling: adopt the empty state, or re-upload the cache.
+ */
+const USER_KEY = `${STORAGE_KEY}__user`;
+
 export const defaultData = (): AppData => ({
   schema_version: SCHEMA_VERSION,
   transactions: [],
@@ -77,3 +86,17 @@ export const readCache     = () => readSlot(STORAGE_KEY);
 export const writeCache    = (data: AppData) => writeSlot(STORAGE_KEY, data);
 export const readSnapshot  = () => readSlot(SNAPSHOT_KEY).data;
 export const writeSnapshot = (data: AppData) => writeSlot(SNAPSHOT_KEY, data);
+
+export const readUserId = (): string | null => {
+  try {
+    return typeof window !== "undefined" ? localStorage.getItem(USER_KEY) : null;
+  } catch {
+    return null;
+  }
+};
+
+export const writeUserId = (id: string): void => {
+  try {
+    localStorage.setItem(USER_KEY, id);
+  } catch { /* quota — identity check degrades, nothing else */ }
+};

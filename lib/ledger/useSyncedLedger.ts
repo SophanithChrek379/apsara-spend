@@ -3,10 +3,15 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { AppData } from "@/lib/types";
 import { MIGRATED_KEY } from "@/lib/constants";
-import { readCache, writeCache, readSnapshot, writeSnapshot, defaultData } from "@/lib/ledger/cache";
-import { diffLedger, isUuid } from "@/lib/ledger/diff";
-import { ensureSession } from "@/lib/ledger/session";
-import { fetchLedger, pushOps, ApiError } from "@/lib/ledger/api";
+import {
+  readCache, writeCache,
+  readSnapshot, writeSnapshot,
+  readUserId, writeUserId,
+  defaultData,
+} from "@/lib/ledger/cache";
+import { diffLedger, reconcileLedger, pushedState, isUuid, type PushedState } from "@/lib/ledger/diff";
+import { ensureSession, recoverSession } from "@/lib/ledger/session";
+import { pushOps, ApiError } from "@/lib/ledger/api";
 
 export type SyncStatus = "loading" | "synced" | "pending" | "offline" | "error";
 
@@ -41,6 +46,49 @@ export const newTransactionId = newUuid;
 
 const DEBOUNCE_MS = 400;
 
+/** Delays between the boot reconcile's attempts. One cold open, three chances. */
+const BOOT_RETRY_DELAYS_MS = [800, 2_400];
+
+const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+
+interface InitialState {
+  data: AppData;
+  snapshot: AppData;
+  corrupted: boolean;
+}
+
+/**
+ * Reads both localStorage slots once, and resolves the one combination that
+ * cannot be taken at face value.
+ *
+ * A cache that yielded nothing (missing or unreadable) next to a snapshot that
+ * holds rows does NOT mean the user deleted everything: diffing the empty
+ * ledger against that snapshot emits a delete per row, and flushing it wipes
+ * the server. Dropping the snapshot here — before any effect, any render and
+ * any network call — makes that diff unrepresentable, so no code path can push
+ * a wipe derived from a lost cache even if every request fails. A genuine
+ * delete-all leaves a *valid* cache holding zero rows and still syncs normally.
+ */
+const readInitialState = (): InitialState => {
+  if (typeof window === "undefined") {
+    return { data: defaultData(), snapshot: defaultData(), corrupted: false };
+  }
+
+  const { data, corrupted } = readCache();
+  let snapshot = readSnapshot() ?? defaultData();
+
+  const snapshotHasRows =
+    snapshot.transactions.length > 0 || Object.keys(snapshot.monthlyBalances).length > 0;
+
+  if (data === null && snapshotHasRows) {
+    console.warn("[ledger] cache lost but snapshot has rows — dropping the snapshot so the server state is pulled, never deleted");
+    snapshot = defaultData();
+    writeSnapshot(snapshot);
+  }
+
+  return { data: data ?? defaultData(), snapshot, corrupted };
+};
+
 /**
  * Owns the ledger. Drop-in replacement for the old
  * `useState<AppData>(() => loadData())` plus its debounced save effect:
@@ -49,25 +97,17 @@ const DEBOUNCE_MS = 400;
  *
  * Lifecycle on mount:
  *   1. paint from cache synchronously (frame one, no network)
- *   2. ensure an anonymous session
- *   3. one-time import of pre-existing localStorage data
- *   4. flush the pending diff, then pull authoritative state
+ *   2. release the UI — `isLoaded` is about the cache read, never the network
+ *   3. ensure an anonymous session, remap pre-database ids
+ *   4. flush the pending diff and merge the authoritative state in, retrying
  *
- * Steps 2–4 are best-effort. If any fails the app stays fully usable against
+ * Steps 3–4 are best-effort. If any fails the app stays fully usable against
  * the cache and retries on reconnect, which is the whole point of keeping
  * localStorage in the loop.
  */
 export function useSyncedLedger() {
-  const initial = useRef<{ data: AppData; corrupted: boolean; absent: boolean }>();
-  if (!initial.current) {
-    const { data, corrupted } = typeof window === "undefined"
-      ? { data: null, corrupted: false }
-      : readCache();
-    // `absent` = the cache slot yielded nothing, whether missing or unreadable.
-    // Distinct from "read fine and holds zero rows", which is a legitimate state
-    // (the user deleted everything) and must still be allowed to sync.
-    initial.current = { data: data ?? defaultData(), corrupted, absent: data === null };
-  }
+  const initial = useRef<InitialState>();
+  if (!initial.current) initial.current = readInitialState();
 
   const [data, setDataRaw]   = useState<AppData>(initial.current.data);
   const [isLoaded, setLoaded] = useState(false);
@@ -75,11 +115,11 @@ export function useSyncedLedger() {
   const [pendingCount, setPendingCount] = useState(0);
   const cacheCorrupted = initial.current.corrupted;
 
-  // Bumped on every local write. A pull that started before the bump is stale
-  // and must not overwrite what the user just did.
+  // Bumped on every local write, so a pull can tell whether the user changed
+  // something during the round trip and queue another flush.
   const revRef      = useRef(0);
   const dataRef     = useRef(data);
-  const snapshotRef = useRef<AppData>(readSnapshotSafe());
+  const snapshotRef = useRef<AppData>(initial.current.snapshot);
   const syncingRef  = useRef(false);
   const resyncRef   = useRef(false);
   const quotaWarnRef = useRef(false);
@@ -91,7 +131,74 @@ export function useSyncedLedger() {
     setDataRaw(update);
   }, []);
 
-  /** Push pending ops, then adopt server state unless the user wrote meanwhile. */
+  /**
+   * Release the shell as soon as we are mounted. The cache is already in state,
+   * so there is nothing left to wait for — and waiting for the network is what
+   * used to leave every month showing skeletons: `isLoaded` only flipped after
+   * the boot round trip settled, and a stalled request never settles. Network
+   * state belongs in `status`, which the sync pill renders, not in the gate that
+   * decides whether the user may see their own expenses.
+   */
+  useEffect(() => { setLoaded(true); }, []);
+
+  /**
+   * Merge authoritative server state into what the user is looking at, and
+   * persist both. Never a wholesale replace — see reconcileLedger. `pushed` is
+   * what this round trip sent, which is what lets the merge tell a stale local
+   * row from one the server has already answered on.
+   */
+  const adopt = useCallback((server: AppData, pushed?: PushedState) => {
+    const merged = reconcileLedger(server, dataRef.current, snapshotRef.current, pushed);
+
+    snapshotRef.current = server;
+    writeSnapshot(server);
+    dataRef.current = merged; // refs sync on render; callers below read it now
+    setDataRaw(merged);
+    writeCache(merged);
+
+    const remaining = diffLedger(server, merged).length;
+    setPendingCount(remaining);
+    setStatus(remaining > 0 ? "pending" : "synced");
+    if (remaining > 0) resyncRef.current = true;
+  }, []);
+
+  /**
+   * A replaced anonymous identity (cookies cleared, refresh token revoked) owns
+   * no rows, so its ledger reads as empty. Clearing the snapshot turns that from
+   * "adopt an empty ledger over the cache" into "re-upload the cache under the
+   * new uid" — the local data is the same data either way, and it stays visible.
+   */
+  const adoptIdentity = useCallback((userId: string) => {
+    const known = readUserId();
+    if (known === userId) return;
+
+    if (known) {
+      console.warn("[ledger] anonymous identity changed — re-uploading the local ledger under the new user");
+      snapshotRef.current = defaultData();
+      writeSnapshot(snapshotRef.current);
+    }
+    writeUserId(userId);
+  }, []);
+
+  /**
+   * A 401 from our own API means the access token went stale — the app was
+   * backgrounded past its expiry, or the proxy and the client raced to rotate
+   * it. Refresh and try once. Without this the ledger falls back to the cache
+   * for the rest of the session even though the server is reachable and holds
+   * the data. Replayed ops are idempotent, so a partially applied batch is safe.
+   */
+  const pushWithAuthRetry = useCallback(async (ops: Parameters<typeof pushOps>[0], pull: boolean) => {
+    try {
+      return await pushOps(ops, { pull });
+    } catch (err) {
+      if (!(err instanceof ApiError) || err.status !== 401) throw err;
+      const recovered = await recoverSession();
+      if (!recovered) throw err;
+      return await pushOps(ops, { pull });
+    }
+  }, []);
+
+  /** Push pending ops, then merge server state back in. */
   const sync = useCallback(async (opts: { pull?: boolean } = {}): Promise<SyncResult> => {
     const localTotal = () => dataRef.current.transactions.length;
 
@@ -112,29 +219,19 @@ export function useSyncedLedger() {
         setStatus("offline");
         return { ok: false, pushed: 0, total: localTotal(), reason: "unauthenticated" };
       }
+      adoptIdentity(userId);
 
       const revAtStart = revRef.current;
       const local      = dataRef.current;
       const ops        = diffLedger(snapshotRef.current, local);
 
-      const { ledger } = await pushOps(ops, { pull: opts.pull !== false });
+      const { ledger } = await pushWithAuthRetry(ops, opts.pull !== false);
 
       if (ledger) {
-        if (revRef.current === revAtStart) {
-          // Nothing changed locally during the round trip — server is truth.
-          snapshotRef.current = ledger;
-          writeSnapshot(ledger);
-          setDataRaw(ledger);
-          writeCache(ledger);
-          setPendingCount(0);
-          setStatus("synced");
-        } else {
-          // User wrote mid-flight. The ops we sent are now in the server state,
-          // so it's a valid snapshot — but don't clobber the newer local data.
-          snapshotRef.current = ledger;
-          writeSnapshot(ledger);
-          resyncRef.current = true;
-        }
+        adopt(ledger, pushedState(ops));
+        // The ops we sent are in that response, so anything the user changed
+        // mid-flight is still pending and needs another round.
+        if (revRef.current !== revAtStart) resyncRef.current = true;
         return { ok: true, pushed: ops.length, total: ledger.transactions.length };
       }
 
@@ -164,7 +261,7 @@ export function useSyncedLedger() {
         void sync({ pull: true });
       }
     }
-  }, []);
+  }, [adopt, adoptIdentity, pushWithAuthRetry]);
 
   // ── Boot ─────────────────────────────────────────────────────────────────
   useEffect(() => {
@@ -179,6 +276,8 @@ export function useSyncedLedger() {
           setStatus("offline");
           return;
         }
+
+        adoptIdentity(userId);
 
         // One-time id remap for data written before the DB existed. Legacy ids
         // are `Date.now()+random` strings, which cannot be uuid primary keys.
@@ -210,50 +309,26 @@ export function useSyncedLedger() {
           localStorage.setItem(MIGRATED_KEY, "1");
         }
 
-        // A cache that read as nothing is NOT "the user deleted everything".
-        // Diffing an empty ledger against a populated snapshot emits a deleteTx
-        // per row and would wipe the server on the next flush. A genuine
-        // delete-all leaves a *valid* cache holding zero rows, which still
-        // syncs normally — only a missing or corrupt slot lands here.
-        const snapshotHasRows =
-          snapshotRef.current.transactions.length > 0 ||
-          Object.keys(snapshotRef.current.monthlyBalances).length > 0;
-
-        if (initial.current!.absent && snapshotHasRows) {
-          console.warn("[ledger] cache lost but snapshot has rows — pulling instead of pushing deletes");
-          const ledger = await fetchLedger();
-          if (cancelled) return;
-          snapshotRef.current = ledger;
-          writeSnapshot(ledger);
-          setDataRaw(ledger);
-          writeCache(ledger);
-          setStatus("synced");
-          return;
-        }
-
-        // Pre-existing data is now just a pending diff against an empty
-        // snapshot — the same path an offline backlog takes. No special-cased
-        // import, so there is one less way for this to go wrong.
-        const pending = diffLedger(snapshotRef.current, dataRef.current);
-        if (pending.length > 0) {
-          await sync({ pull: true });
-        } else {
-          const ledger = await fetchLedger();
-          if (cancelled) return;
-          snapshotRef.current = ledger;
-          writeSnapshot(ledger);
-          setDataRaw(ledger);
-          writeCache(ledger);
-          setStatus("synced");
+        // Pre-existing data is just a pending diff against an empty snapshot —
+        // the same path an offline backlog takes. No special-cased import, so
+        // there is one less way for this to go wrong.
+        //
+        // Retried, because this is the round trip that decides whether the user
+        // sees the server's ledger at all, and a cold open on a flaky mobile
+        // connection is exactly when it fails. Only a genuine error is retried:
+        // offline and unauthenticated are handled by the reconnect listeners,
+        // and "busy" means a flush is already running and will resync.
+        for (let attempt = 0; !cancelled; attempt++) {
+          const result = await sync({ pull: true });
+          if (result.ok || result.reason !== "error") break;
+          if (attempt >= BOOT_RETRY_DELAYS_MS.length) break;
+          await sleep(BOOT_RETRY_DELAYS_MS[attempt]);
         }
       } catch (err) {
         if (!cancelled) {
           console.warn("[ledger] boot sync failed, using cache:", err);
           setStatus(typeof navigator !== "undefined" && !navigator.onLine ? "offline" : "error");
         }
-      } finally {
-        // Always release the splash — a failed sync must never trap the user.
-        if (!cancelled) setLoaded(true);
       }
     })();
 
@@ -316,9 +391,4 @@ export function useSyncedLedger() {
     cacheCorrupted,
     syncNow: useCallback(() => sync({ pull: true }), [sync]),
   };
-}
-
-function readSnapshotSafe(): AppData {
-  if (typeof window === "undefined") return defaultData();
-  return readSnapshot() ?? defaultData();
 }

@@ -12,26 +12,67 @@ export class ApiError extends Error {
   }
 }
 
+/**
+ * The request never produced a response — DNS/offline, a dropped connection, or
+ * a stall that hit the timeout. Distinct from ApiError because it carries no
+ * status and is always worth retrying.
+ */
+export class NetworkError extends Error {
+  constructor(message: string, readonly timedOut = false) {
+    super(message);
+  }
+}
+
 /** Server op batches are capped; chunk so a big reset still flushes. */
 const OPS_PER_BATCH = 200;
 
+/**
+ * Hard ceiling on every call. A mobile radio that accepts the connection and
+ * then stalls leaves `fetch` pending indefinitely — no error, no response. The
+ * boot pull used to await exactly that, so a single stalled request could keep
+ * the ledger in its loading state for as long as the app stayed open. Nothing
+ * here may hang: a timeout that surfaces as a retryable error is always better
+ * than a promise that never settles.
+ */
+const REQUEST_TIMEOUT_MS = 12_000;
+
 const request = async <T>(url: string, init?: RequestInit): Promise<T> => {
-  const res = await fetch(url, {
-    ...init,
-    headers: { "Content-Type": "application/json", ...(init?.headers ?? {}) },
-    cache: "no-store",
-  });
+  const controller = new AbortController();
+  let timedOut = false;
+  const timer = setTimeout(() => {
+    timedOut = true;
+    controller.abort();
+  }, REQUEST_TIMEOUT_MS);
 
-  if (!res.ok) {
-    let message = `Request failed (${res.status})`;
-    try {
-      const body = await res.json();
-      if (body?.error) message = body.error;
-    } catch { /* non-JSON error body */ }
-    throw new ApiError(message, res.status);
+  try {
+    const res = await fetch(url, {
+      ...init,
+      headers: { "Content-Type": "application/json", ...(init?.headers ?? {}) },
+      cache: "no-store",
+      signal: controller.signal,
+    });
+
+    if (!res.ok) {
+      let message = `Request failed (${res.status})`;
+      try {
+        const body = await res.json();
+        if (body?.error) message = body.error;
+      } catch { /* non-JSON error body */ }
+      throw new ApiError(message, res.status);
+    }
+
+    return (await res.json()) as T;
+  } catch (err) {
+    if (err instanceof ApiError) throw err;
+    throw new NetworkError(
+      timedOut
+        ? `Request to ${url} timed out after ${REQUEST_TIMEOUT_MS}ms`
+        : `Request to ${url} failed: ${err instanceof Error ? err.message : String(err)}`,
+      timedOut,
+    );
+  } finally {
+    clearTimeout(timer);
   }
-
-  return res.json() as Promise<T>;
 };
 
 export const fetchLedger = async (): Promise<AppData> => {

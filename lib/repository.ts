@@ -34,18 +34,48 @@ const unwrap = <T>(res: { data: T | null; error: { message: string } | null }): 
 
 // ── transactions ───────────────────────────────────────────────────────────
 
+/**
+ * PostgREST refuses to return more rows than `db-max-rows` (1000 on hosted
+ * Supabase) in one response, and it truncates silently — no error, no flag. An
+ * unpaginated read is therefore a slow-acting bug: the ledger looks complete
+ * until the 1001st expense, at which point the client adopts a short response
+ * as the whole truth and the oldest months quietly stop appearing. The exact
+ * count comes back with the first page, so the loop knows when it is done.
+ */
+const PAGE_SIZE = 1_000;
+
 export const listTransactions = async (
   supabase: SupabaseClient,
   opts: { month?: string } = {},
 ): Promise<Transaction[]> => {
-  let q = supabase.from("transactions").select(TX_COLUMNS).order("spent_on", { ascending: false });
+  const rows: TransactionRow[] = [];
+  let total = Infinity;
 
-  if (opts.month) {
-    const { from, to } = monthBounds(assertMonthKey(opts.month));
-    q = q.gte("spent_on", from).lt("spent_on", to);
+  while (rows.length < total) {
+    // spent_on alone is not a total order — ties would let rows repeat or slip
+    // between pages. id breaks them deterministically.
+    let q = supabase
+      .from("transactions")
+      .select(TX_COLUMNS, { count: "exact" })
+      .order("spent_on", { ascending: false })
+      .order("id", { ascending: true })
+      .range(rows.length, rows.length + PAGE_SIZE - 1);
+
+    if (opts.month) {
+      const { from, to } = monthBounds(assertMonthKey(opts.month));
+      q = q.gte("spent_on", from).lt("spent_on", to);
+    }
+
+    const res = await q;
+    if (res.error) throw new Error(res.error.message);
+
+    const page = (res.data ?? []) as unknown as TransactionRow[];
+    rows.push(...page);
+    total = res.count ?? rows.length;
+
+    if (page.length === 0) break; // never spin, whatever the server reports
   }
 
-  const rows = unwrap(await q) as unknown as TransactionRow[];
   return rows.map(rowToTransaction);
 };
 
