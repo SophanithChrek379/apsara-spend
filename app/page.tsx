@@ -1399,6 +1399,14 @@ export default function ApsaraSpendPage() {
   // Reset visible count when month or filter changes so we always start at top
   useEffect(() => { setVisibleCount(10); }, [selectedMonth, filterCategory]);
 
+  // Clear the stored filter once the month has actually changed, so coming back
+  // to July later opens on All rather than resurrecting the filter that was on
+  // when you left it. The derivation above already renders "all" from the first
+  // frame; this only stops the stale value lingering in state behind it.
+  useEffect(() => {
+    setCatFilter((f) => (f.month === selectedMonth ? f : { month: selectedMonth, cat: "all" }));
+  }, [selectedMonth]);
+
   // ── Navigation ───────────────────────────────────────────────────────────────
 
   const navigateMonth = (delta: 1 | -1) => {
@@ -2645,9 +2653,26 @@ export default function ApsaraSpendPage() {
             onDragEnd={handleDragEnd}
             onClick={() => { openSwipeId && setOpenSwipeId(null); }}
             style={{ touchAction: "pan-y", cursor: "grab" }}>
-            <AnimatePresence mode="wait" custom={swipeDir}>
+            {/* No AnimatePresence here, deliberately — this subtree slides in on
+                a key change but never animates out.
+
+                Under `mode="wait"` AnimatePresence holds the outgoing month on
+                screen and mounts the incoming one only when every motion child
+                in the outgoing subtree has reported its exit complete. Rows that
+                unmount while the subtree is still present — which is exactly what
+                a category filter does — leave entries in that completion map that
+                can never report. The month then animated out to opacity 0 and the
+                next one was never mounted: the header said June while the body
+                was a blank white page, permanently, until reload. One tap on a
+                category chip was enough to arm it for the rest of the session,
+                whether or not the filter was still on when the month changed.
+
+                A keyed motion.div cannot reach that state. React swaps the
+                subtree on the key and framer only has to animate the arrival, so
+                there is no cross-subtree handshake to deadlock. The cost is the
+                outgoing month leaving instantly instead of sliding off. */}
               <motion.div key={selectedMonth} custom={swipeDir} variants={slideVariants}
-                initial="enter" animate="center" exit="exit"
+                initial="enter" animate="center"
                 transition={{ duration: 0.26, ease: [0.4, 0, 0.2, 1] }}>
 
                 {/* J4+J5 — Shaped skeletons matching real card geometry */}
@@ -2731,7 +2756,6 @@ export default function ApsaraSpendPage() {
                 )}
 
               </motion.div>
-            </AnimatePresence>
 
           {showSwipeHint && hasData && (
           <div className="swipe-hint" style={{ textAlign: "center", marginTop: 14, fontSize: 11, color: "var(--color-text-ghost)", letterSpacing: "0.1em", fontFamily: "var(--font-body)" }}>
