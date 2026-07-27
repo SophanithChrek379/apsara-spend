@@ -7,7 +7,7 @@ import {
   UtensilsCrossed, Bike, Zap, Users, ShoppingBag, MoreHorizontal,
   CalendarDays, Lightbulb, Lock, Check, AlertTriangle, Circle, Pencil, Receipt,
   Download, FileText,
-  Cloud, CloudOff, UploadCloud, RefreshCw, ArrowDown,
+  Cloud, CloudOff, UploadCloud, RefreshCw,
   type LucideIcon,
 } from "lucide-react";
 
@@ -18,7 +18,6 @@ import {
 import type { Currency, CategoryId, Transaction, AppData } from "@/lib/types";
 import { useSyncedLedger, newTransactionId, type SyncStatus, type SyncResult } from "@/lib/ledger/useSyncedLedger";
 import { downloadBackupJson, downloadCsv } from "@/lib/ledger/export";
-import { usePullToRefresh } from "@/lib/usePullToRefresh";
 
 // Use the official LucideIcon type so Lucide component props align exactly
 type IconComp   = LucideIcon;
@@ -1028,8 +1027,19 @@ export default function ApsaraSpendPage() {
   const [showSettings,     setShowSettings]     = useState(false);
   const [resetConfirm,     setResetConfirm]     = useState(false);
   const [toast,            setToast]            = useState<Toast | null>(null);
-  // L1 — category filter for the Entries list; resets whenever the month changes
-  const [filterCategory,   setFilterCategory]   = useState<CategoryId | "all">("all");
+  // L1 — category filter for the Entries list.
+  //
+  // The month it was chosen on is stored with it. A bare CategoryId outlives the
+  // list it describes: the chips are built from the categories *this* month has
+  // entries in, so a filter carried into another month can select a category
+  // with no chip and no rows — an empty list with nothing highlighted, which
+  // reads as "my expenses are gone". Pairing the two makes the read below fall
+  // back to "all" the instant selectedMonth moves, without every navigation path
+  // having to remember to reset it, and without depending on two setState calls
+  // landing in the same batch. See `filterCategory` for the derivation.
+  const [catFilter,        setCatFilter]        = useState<{ month: string; cat: CategoryId | "all" }>(
+    () => ({ month: todayMonthKey(), cat: "all" })
+  );
   const [showFilterMenu,   setShowFilterMenu]   = useState(false);
   // L — Swipe-to-delete: openSwipeId tracks which row is snapped open.
   // confirmDeleteTx holds the transaction pending confirmation.
@@ -1046,20 +1056,10 @@ export default function ApsaraSpendPage() {
   );
   // I1 — Infinite scroll: show 10 rows at a time, load more as user scrolls
   const [visibleCount,     setVisibleCount]     = useState(10);
-  // Fix: use callback ref instead of useRef so the observer attaches the moment
-  // the sentinel div mounts (after list renders), not on initial component mount
-  // when the div doesn't exist yet.
-  const loadMoreRef = useCallback((node: HTMLDivElement | null) => {
-    if (!node) return;
-    const observer = new IntersectionObserver((entries) => {
-      if (entries[0].isIntersecting) {
-        setVisibleCount((v) => v + 10);
-      }
-    }, { rootMargin: "100px", threshold: 0 });
-    observer.observe(node);
-    // Return cleanup via a WeakMap pattern isn't possible here, but the
-    // observer auto-disconnects when the node is removed from DOM.
-  }, []);
+  // The sentinel is held in state, not a ref: it is mounted by the list, which
+  // renders after this component does, and a ref write alone would not wake the
+  // effect that observes it. See the effect below `sortedTxs`.
+  const [loadMoreNode,     setLoadMoreNode]     = useState<HTMLDivElement | null>(null);
   // O2 — monthly budget flow state
   const [showBudgetModal,  setShowBudgetModal]  = useState(false);
   const [budgetInput,      setBudgetInput]      = useState("");
@@ -1267,6 +1267,28 @@ export default function ApsaraSpendPage() {
     [data.transactions, selectedMonth]
   );
 
+  // L1 — the filter actually in force, derived rather than stored.
+  //
+  // Two ways a stored category stops describing anything on screen, both of
+  // which used to leave the list empty with no chip lit:
+  //   · the month changed underneath it (swipe, chevron, or the month picker);
+  //   · its last entry in this month was deleted, so its chip is gone too.
+  // Either one falls back to "all" here, so the list can only ever be filtered
+  // by a category the user can see selected and can tap off again.
+  const filterCategory: CategoryId | "all" =
+    catFilter.month === selectedMonth &&
+    catFilter.cat !== "all" &&
+    monthTxs.some((t) => t.category === catFilter.cat)
+      ? catFilter.cat
+      : "all";
+
+  // Stamps the choice with the month currently on screen — the one whose chips
+  // the tap came from — so the pairing above can never go stale.
+  const setFilterCategory = useCallback(
+    (cat: CategoryId | "all") => setCatFilter({ month: selectedMonth, cat }),
+    [selectedMonth]
+  );
+
   const totalUSD = useMemo(() =>
     pin2(monthTxs.reduce((s, t) => s + t.amountUSD, 0)),
     [monthTxs]
@@ -1387,7 +1409,9 @@ export default function ApsaraSpendPage() {
     }
     setSwipeDir(delta);
     setSelectedMonth(next);
-    setFilterCategory("all");
+    // No filter reset here — `filterCategory` is derived from selectedMonth, so
+    // the new month is unfiltered the moment this lands. Resetting the stored
+    // value as well would only re-stamp it with the month we are leaving.
     setShowFilterMenu(false);
   };
 
@@ -1511,34 +1535,6 @@ export default function ApsaraSpendPage() {
   // zero budget with its own "Set budget" prompt, so nothing is lost by showing
   // the dashboard here.
   const showDashboard = hasMonthBudget || monthTxs.length > 0;
-
-  // ── Pull to refresh ───────────────────────────────────────────────────────
-  // Reconciles whichever month is on screen with the server. It runs the same
-  // round trip as the sync pill — push pending, then adopt server state — so a
-  // pull on July also picks up anything another device wrote to April. The
-  // ledger endpoint returns every month in one shot; there is nothing
-  // month-scoped to fetch.
-  //
-  // Off while a modal owns the screen (body scroll is locked there, so the
-  // gesture would read as a pull from the top when it isn't) and off behind the
-  // budget gate, where the InitScreen is the only thing rendered and there is
-  // no ledger to refresh yet.
-  const pullEnabled =
-    isLoaded && showDashboard &&
-    !showModal && !showSettings && !showPicker && !showBudgetModal && !confirmDeleteTx;
-
-  const {
-    ref: pullRef,
-    distance: pullDistance,
-    phase: pullPhase,
-    progress: pullProgress,
-    dragging: pullDragging,
-  } = usePullToRefresh<HTMLElement>({ onRefresh: handleSyncNow, enabled: pullEnabled });
-
-  const pullLabel =
-    pullPhase === "refreshing" ? "REFRESHING…"
-    : pullPhase === "armed"    ? "RELEASE TO REFRESH"
-                               : "PULL TO REFRESH";
 
   // A1/A2 — Save OR update the budget for selectedMonth.
   // No immutability lock — user can revise at any time (satisfies User 1).
@@ -1709,10 +1705,42 @@ export default function ApsaraSpendPage() {
   const activeCat   = CATEGORIES.find((c) => c.id === filterCategory);
   const filteredTxs = useMemo(() =>
     filterCategory === "all"
-      ? [...monthTxs]
-      : [...monthTxs].filter((t) => t.category === filterCategory),
+      ? monthTxs
+      : monthTxs.filter((t) => t.category === filterCategory),
     [monthTxs, filterCategory]
   );
+
+  // Newest first, id as the tiebreak so two entries on the same day hold a
+  // stable order across renders instead of shuffling on every re-sort.
+  const sortedTxs = useMemo(() =>
+    [...filteredTxs].sort((a, b) =>
+      new Date(b.date).getTime() - new Date(a.date).getTime() ||
+      b.id.localeCompare(a.id)
+    ),
+    [filteredTxs]
+  );
+
+  const visibleTxs  = sortedTxs.slice(0, visibleCount);
+  const hasMoreRows = visibleCount < sortedTxs.length;
+
+  // I2 — Reveal the next page when the sentinel comes into view.
+  //
+  // Re-created on every visibleCount change on purpose. An IntersectionObserver
+  // only reports *transitions*, so a sentinel that is still on screen after ten
+  // more rows were revealed — a short list, a tall viewport — never fires again
+  // and the list stalls with entries left unshown. Re-observing re-delivers the
+  // current state, so it keeps paging until the sentinel is pushed off screen or
+  // hasMoreRows goes false. Disconnecting on cleanup also stops an observer
+  // leaking on every month switch, filter change and page.
+  useEffect(() => {
+    if (!loadMoreNode || !hasMoreRows) return;
+    const io = new IntersectionObserver(
+      (entries) => { if (entries[0].isIntersecting) setVisibleCount((v) => v + 10); },
+      { rootMargin: "100px", threshold: 0 },
+    );
+    io.observe(loadMoreNode);
+    return () => io.disconnect();
+  }, [loadMoreNode, hasMoreRows, visibleCount]);
 
   const TransactionList = hasData ? (
     <div style={{ background: "var(--color-bg-card)", borderRadius: 22, padding: "20px 20px 24px", border: "1px solid var(--color-border)", display: "flex", flexDirection: "column" }}>
@@ -1764,17 +1792,13 @@ export default function ApsaraSpendPage() {
       </div>
 
       {/* ── Transaction rows (filtered) ── */}
-      {filteredTxs.length === 0 ? (
+      {visibleTxs.length === 0 ? (
         <div style={{ textAlign: "center", padding: "24px 0", color: "var(--color-text-lo)", fontSize: 13, fontFamily: "var(--font-body)" }}>
-          No {activeCat?.label} entries this month
+          {activeCat ? `No ${activeCat.label} entries this month` : "No entries this month"}
         </div>
       ) : (() => {
-        const sorted = [...filteredTxs].sort((a, b) =>
-          new Date(b.date).getTime() - new Date(a.date).getTime() ||
-          b.id.localeCompare(a.id)
-        );
-        const visible  = sorted.slice(0, visibleCount);
-        const hasMore  = visibleCount < sorted.length;
+        const visible = visibleTxs;
+        const hasMore = hasMoreRows;
 
         // TX3 — build a set of dates that need a group header above them
         const todayStr     = localDateString();
@@ -1840,7 +1864,11 @@ export default function ApsaraSpendPage() {
                   style={{ background: "var(--color-bg-card)", position: "relative", zIndex: 1, touchAction: "pan-y" }}
                 >
                   <motion.button
-                    initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: i * 0.03 }}
+                    // Stagger restarts each page of ten. On `i` alone the 30th
+                    // row waited most of a second to become visible, which on a
+                    // long month reads as rows failing to load rather than
+                    // arriving.
+                    initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: (i % 10) * 0.03 }}
                     aria-label={`${tx.note || cat.label}, ${fmt(tx.amountUSD)}, ${dateStr}. Press E to edit, Delete to remove.`}
                     onClick={() => {
                       // S4 — block accidental edit if drag just finished
@@ -1857,7 +1885,10 @@ export default function ApsaraSpendPage() {
                     <CategoryIcon cat={cat} active />
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <div style={{ fontSize: 14, fontWeight: 600, color: "var(--color-text-mid)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", lineHeight: 1.5, fontFamily: "var(--font-body)" }}>
-                        {tx.note}
+                        {/* Same fallback as the aria-label: a row synced from
+                            elsewhere can carry an empty note, and a blank title
+                            line reads as a broken row. */}
+                        {tx.note || cat.label}
                       </div>
                       <div style={{ fontSize: 12, color: "var(--color-text-lo)", marginTop: 4, fontFamily: "var(--font-body)", lineHeight: 1.4 }}>
                         {cat.label} · {dateStr}
@@ -1891,8 +1922,9 @@ export default function ApsaraSpendPage() {
             </div>
           ))}
 
-          {/* I2 — Sentinel: callback ref fires IntersectionObserver when this div mounts */}
-          <div ref={loadMoreRef} style={{ height: 4 }} />
+          {/* I2 — Sentinel: setLoadMoreNode is stable, so React calls it once on
+              mount and once with null on unmount, waking the observer effect. */}
+          <div ref={setLoadMoreNode} style={{ height: 4 }} />
           </>
         );
       })()}
@@ -2506,7 +2538,6 @@ export default function ApsaraSpendPage() {
       </AnimatePresence>
 
       <main className="main-wrap"
-        ref={pullRef}
         style={{
           fontFamily: "var(--font-body)",
           background: "var(--color-bg-page)",
@@ -2606,54 +2637,7 @@ export default function ApsaraSpendPage() {
 
           </div>{/* end .sticky-header */}
 
-          {/* ════ PULL TO REFRESH ════ */}
-          {/* The indicator lives in the gap the content is pushed down to open,
-              so it is revealed rather than overlaid. Height 0 at rest means it
-              occupies nothing and the layout below is byte-identical to before. */}
-          <div style={{ position: "relative" }}>
-            <div
-              aria-hidden={pullDistance === 0}
-              style={{
-                position: "absolute", top: 0, left: 0, right: 0,
-                height: pullDistance,
-                display: "flex", alignItems: "center", justifyContent: "center",
-                overflow: "hidden", pointerEvents: "none",
-                opacity: Math.min(1, pullProgress * 1.6),
-                transition: pullDragging ? "none" : "height 0.32s cubic-bezier(0.4,0,0.2,1), opacity 0.32s",
-              }}
-            >
-              <div style={{
-                display: "flex", alignItems: "center", gap: 7,
-                fontSize: 10, fontWeight: 600, letterSpacing: "0.1em",
-                fontFamily: "var(--font-body)", whiteSpace: "nowrap",
-                color: pullPhase === "armed" ? "var(--accent)" : "var(--color-text-lo)",
-                transition: "color 0.18s",
-              }}>
-                {pullPhase === "refreshing" ? (
-                  <motion.span
-                    animate={{ rotate: 360 }}
-                    transition={{ repeat: Infinity, duration: 0.9, ease: "linear" }}
-                    style={{ display: "inline-flex" }}>
-                    <RefreshCw size={13} strokeWidth={2.4} />
-                  </motion.span>
-                ) : (
-                  // Flips to point up as the pull arms — the arrow itself is the
-                  // progress meter, so no separate ring or bar is needed.
-                  <span style={{ display: "inline-flex", transform: `rotate(${pullProgress * 180}deg)` }}>
-                    <ArrowDown size={13} strokeWidth={2.4} />
-                  </span>
-                )}
-                {pullLabel}
-              </div>
-            </div>
-
           {/* ════ SWIPEABLE DASHBOARD — horizontal drag navigates months ════ */}
-          {/* translateY only while pulling: at rest there is no transform at all,
-              so this never becomes a containing block for fixed descendants. */}
-          <div style={{
-            transform: pullDistance > 0 ? `translateY(${pullDistance}px)` : undefined,
-            transition: pullDragging ? "none" : "transform 0.32s cubic-bezier(0.4,0,0.2,1)",
-          }}>
           <motion.div
             drag="x"
             dragConstraints={{ left: 0, right: 0 }}
@@ -2755,8 +2739,6 @@ export default function ApsaraSpendPage() {
           </div>
           )}
           </motion.div>
-          </div>{/* end pull-to-refresh translate */}
-          </div>{/* end pull-to-refresh wrapper */}
         </div>{/* end main-scroll */}
         {isLoaded && hasMonthBudget && !fabDisabled && (
         <div className="fab-footer">
@@ -2877,7 +2859,7 @@ export default function ApsaraSpendPage() {
                 const { year: cy, month: cm } = parseMonthKey(selectedMonth);
                 setSwipeDir(ny > cy || (ny === cy && nm > cm) ? 1 : -1);
                 setSelectedMonth(k);
-                setFilterCategory("all");
+                // Filter resets itself — see the `filterCategory` derivation.
                 setShowFilterMenu(false);
               }}
               onClose={() => setShowPicker(false)}
