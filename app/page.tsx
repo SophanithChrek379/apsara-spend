@@ -6,6 +6,7 @@ import {
   Settings, ChevronLeft, ChevronRight, ChevronDown, X, Trash2, Plus,
   UtensilsCrossed, Bike, Zap, Users, ShoppingBag, MoreHorizontal,
   CalendarDays, Lightbulb, Lock, Check, AlertTriangle, Circle, Pencil, Receipt,
+  Download, FileText,
   type LucideIcon,
 } from "lucide-react";
 
@@ -15,6 +16,7 @@ import {
 // route handlers validate against the exact same shapes the UI produces.
 import type { Currency, CategoryId, Transaction, AppData } from "@/lib/types";
 import { useSyncedLedger, newTransactionId } from "@/lib/ledger/useSyncedLedger";
+import { downloadBackupJson, downloadCsv } from "@/lib/ledger/export";
 
 // Use the official LucideIcon type so Lucide component props align exactly
 type IconComp   = LucideIcon;
@@ -1323,6 +1325,27 @@ export default function ApsaraSpendPage() {
       });
       showToast("Expense restored.", "success");
     } : undefined);
+  };
+
+  // ── Export ────────────────────────────────────────────────────────────────
+  // Reads straight from localStorage rather than React state, so the file is a
+  // faithful copy of what's on disk — the whole point of taking it before a
+  // migration. Exports every month, not just the one on screen.
+  const handleExport = (format: "json" | "csv") => {
+    try {
+      const count = format === "json" ? downloadBackupJson(data) : downloadCsv(data);
+      if (count === 0) {
+        showToast("Nothing to export yet.", "info");
+        return;
+      }
+      showToast(
+        `Downloaded ${count} ${count === 1 ? "entry" : "entries"} as ${format.toUpperCase()}.`,
+        "success",
+      );
+    } catch (err) {
+      console.error("[export]", err);
+      showToast("Export failed — could not write the file.", "warn");
+    }
   };
 
   const handleResetMonth = () => {
@@ -2880,7 +2903,37 @@ export default function ApsaraSpendPage() {
                   </div>
                 )}
 
-                {/* ── Group 4: Data — shown when month has a budget or entries ── */}
+                {/* ── Group 4: Backup — always available, covers every month ── */}
+                <div style={{ background: "var(--color-bg-page)", borderRadius: 14, overflow: "hidden" }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "13px 16px", gap: 12 }}>
+                    <div style={{ minWidth: 0 }}>
+                      <div style={{ fontSize: 13, fontWeight: 500, color: "var(--color-text-mid)", fontFamily: "var(--font-body)", marginBottom: 2 }}>
+                        Export data
+                      </div>
+                      <div style={{ fontSize: 11, color: "var(--color-text-lo)", fontFamily: "var(--font-body)", opacity: 0.7 }}>
+                        {data.transactions.length > 0
+                          ? `${data.transactions.length} ${data.transactions.length === 1 ? "entry" : "entries"} across all months`
+                          : "No entries yet"}
+                      </div>
+                    </div>
+                    <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>
+                      <button onClick={() => handleExport("json")}
+                        aria-label="Download full backup as JSON"
+                        style={{ display: "flex", alignItems: "center", gap: 5, background: "var(--accent-muted)", border: "1px solid var(--accent-border)", color: "var(--accent)", borderRadius: 8, padding: "6px 11px", cursor: "pointer", fontSize: 12, fontWeight: 600, fontFamily: "var(--font-body)", whiteSpace: "nowrap" }}>
+                        <Download size={13} strokeWidth={2.2} />
+                        JSON
+                      </button>
+                      <button onClick={() => handleExport("csv")}
+                        aria-label="Download entries as CSV"
+                        style={{ display: "flex", alignItems: "center", gap: 5, background: "var(--color-bg-nav)", border: "1px solid var(--color-border)", color: "var(--color-text-mid)", borderRadius: 8, padding: "6px 11px", cursor: "pointer", fontSize: 12, fontWeight: 600, fontFamily: "var(--font-body)", whiteSpace: "nowrap" }}>
+                        <FileText size={13} strokeWidth={2.2} />
+                        CSV
+                      </button>
+                    </div>
+                  </div>
+                </div>
+
+                {/* ── Group 5: Data — shown when month has a budget or entries ── */}
                 {(monthTxs.length > 0 || monthBalance > 0) && (
                   <div style={{ background: "var(--color-bg-page)", borderRadius: 14, overflow: "hidden" }}>
                     {!resetConfirm ? (
