@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { AppData, SyncOp, Transaction } from "@/lib/types";
+import type { AppData } from "@/lib/types";
 import { MIGRATED_KEY } from "@/lib/constants";
 import { readCache, writeCache, readSnapshot, writeSnapshot, defaultData } from "@/lib/ledger/cache";
 import { diffLedger, isUuid } from "@/lib/ledger/diff";
@@ -147,46 +147,39 @@ export function useSyncedLedger() {
           return;
         }
 
-        // One-time import of data written before the DB existed. Legacy ids are
-        // `Date.now()+random` strings, not uuids, so they get rewritten here —
-        // this is the only place ids change, and the cache is updated to match.
-        // A corrupted cache is skipped rather than marked imported, so a later
-        // good read still gets its chance to migrate.
-        const alreadyImported = localStorage.getItem(MIGRATED_KEY) === "1";
-        if (!alreadyImported && !initial.current!.corrupted) {
+        // One-time id remap for data written before the DB existed. Legacy ids
+        // are `Date.now()+random` strings, which cannot be uuid primary keys.
+        //
+        // The remap is persisted to the cache BEFORE anything is pushed, and the
+        // flag is set immediately. That ordering is the whole trick: if the push
+        // then fails partway, the retry reuses the SAME uuids and every upsert is
+        // idempotent. Minting fresh uuids on each attempt would re-insert every
+        // row that already landed, duplicating the ledger.
+        //
+        // A corrupted cache is skipped rather than marked migrated, so a later
+        // good read still gets its chance.
+        if (localStorage.getItem(MIGRATED_KEY) !== "1" && !initial.current!.corrupted) {
           const local = dataRef.current;
-          const hasLocal =
-            local.transactions.length > 0 || Object.keys(local.monthlyBalances).length > 0;
+          const needsRemap = local.transactions.some((t) => !isUuid(t.id));
 
-          if (hasLocal) {
-            const remapped: Transaction[] = local.transactions.map((t) =>
-              isUuid(t.id) ? t : { ...t, id: newUuid() },
-            );
-            const importOps: SyncOp[] = [
-              ...remapped.map((tx): SyncOp => ({ type: "upsertTx", tx })),
-              ...Object.entries(local.monthlyBalances).map(
-                ([month, amount]): SyncOp => ({ type: "setBudget", month, amount }),
+          if (needsRemap) {
+            const remapped: AppData = {
+              ...local,
+              transactions: local.transactions.map((t) =>
+                isUuid(t.id) ? t : { ...t, id: newUuid() },
               ),
-            ];
-
-            const { ledger } = await pushOps(importOps, { pull: true });
-            if (cancelled) return;
-
-            localStorage.setItem(MIGRATED_KEY, "1");
-            if (ledger) {
-              snapshotRef.current = ledger;
-              writeSnapshot(ledger);
-              setDataRaw(ledger);
-              writeCache(ledger);
-              setStatus("synced");
-              return;
-            }
-          } else {
-            localStorage.setItem(MIGRATED_KEY, "1");
+            };
+            writeCache(remapped);
+            dataRef.current = remapped; // refs update on render; this is pre-render
+            setDataRaw(remapped);
           }
+
+          localStorage.setItem(MIGRATED_KEY, "1");
         }
 
-        // Normal path: flush anything pending, adopt server state.
+        // Pre-existing data is now just a pending diff against an empty
+        // snapshot — the same path an offline backlog takes. No special-cased
+        // import, so there is one less way for this to go wrong.
         const pending = diffLedger(snapshotRef.current, dataRef.current);
         if (pending.length > 0) {
           await sync({ pull: true });
