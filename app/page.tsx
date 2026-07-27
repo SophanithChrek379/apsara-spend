@@ -6,7 +6,7 @@ import {
   Settings, ChevronLeft, ChevronRight, ChevronDown, X, Trash2, Plus,
   UtensilsCrossed, Bike, Zap, Users, ShoppingBag, MoreHorizontal,
   CalendarDays, Lightbulb, Lock, Check, AlertTriangle, Circle, Pencil, Receipt,
-  Download, FileText,
+  Download, FileText, BarChart3,
   Cloud, CloudOff, UploadCloud, RefreshCw,
   type LucideIcon,
 } from "lucide-react";
@@ -19,6 +19,7 @@ import type { Currency, CategoryId, Transaction, AppData } from "@/lib/types";
 import { useSyncedLedger, newTransactionId, type SyncStatus, type SyncResult } from "@/lib/ledger/useSyncedLedger";
 import { downloadBackupJson, downloadCsv } from "@/lib/ledger/export";
 import { isoFromDay, dayFromIso, monthKeyFromIso, todayDay } from "@/lib/calendar-day";
+import { buildReport, PERIOD_LABELS, type ReportData, type ReportPeriod } from "@/lib/report";
 
 // Use the official LucideIcon type so Lucide component props align exactly
 type IconComp   = LucideIcon;
@@ -989,6 +990,295 @@ function SyncPill({ status, pendingCount, onSync }: {
   );
 }
 
+// ─── ReportSheet ──────────────────────────────────────────────────────────────
+//
+// A read-only lens over the ledger, opened from the header and closed again —
+// the dashboard behind it is untouched. Every figure comes from buildReport();
+// nothing here derives its own numbers, so the report and any future export of
+// it can never disagree.
+
+function StatTile({ label, value, unit, hint }: {
+  label: string; value: string; unit?: string; hint: string;
+}) {
+  return (
+    <div style={{ background: "var(--color-bg-page)", border: "1px solid var(--color-border)", borderRadius: 14, padding: "14px 16px", display: "flex", flexDirection: "column", gap: 6, minWidth: 0 }}>
+      <div style={{ fontSize: 12, color: "var(--color-text-lo)", fontFamily: "var(--font-body)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+        {label}
+      </div>
+      <div style={{ display: "flex", alignItems: "baseline", gap: 3, minWidth: 0 }}>
+        <span style={{ fontSize: 26, fontWeight: 800, letterSpacing: "-0.03em", color: "var(--color-text-hi)", fontFamily: "var(--font-headline)", lineHeight: 1 }}>
+          {value}
+        </span>
+        {unit && (
+          <span style={{ fontSize: 13, fontWeight: 600, color: "var(--color-text-lo)", fontFamily: "var(--font-body)" }}>
+            {unit}
+          </span>
+        )}
+      </div>
+      <div style={{ fontSize: 11, color: "var(--color-text-lo)", fontFamily: "var(--font-body)", lineHeight: 1.4, opacity: 0.75 }}>
+        {hint}
+      </div>
+    </div>
+  );
+}
+
+function ReportCard({ title, caption, children }: {
+  title: string; caption: string; children: React.ReactNode;
+}) {
+  return (
+    <div style={{ background: "var(--color-bg-page)", border: "1px solid var(--color-border)", borderRadius: 14, padding: "16px 16px 18px" }}>
+      <div style={{ fontSize: 15, fontWeight: 700, color: "var(--color-text-hi)", fontFamily: "var(--font-headline)", letterSpacing: "-0.01em" }}>
+        {title}
+      </div>
+      <div style={{ fontSize: 11, color: "var(--color-text-lo)", fontFamily: "var(--font-body)", marginTop: 3, marginBottom: 14, lineHeight: 1.4, opacity: 0.8 }}>
+        {caption}
+      </div>
+      {children}
+    </div>
+  );
+}
+
+function ReportSheet({
+  report, period, onPeriodChange, periodSubtitle, fmt, currency,
+  onPickCategory, onClose, sheetMode, sheetRef,
+}: {
+  report: ReportData;
+  period: ReportPeriod;
+  onPeriodChange: (p: ReportPeriod) => void;
+  periodSubtitle: string;
+  fmt: (usd: number) => string;
+  currency: Currency;
+  onPickCategory: (cat: CategoryId) => void;
+  onClose: () => void;
+  sheetMode: "sheet" | "center";
+  sheetRef: React.RefObject<HTMLDivElement>;
+}) {
+  const {
+    count, countDelta, total, avg,
+    budget, budgetMonths, budgetUsedPct, remaining,
+    byCategory, bySize, recent, activeDays, months,
+  } = report;
+
+  // The delta line under "Entries". Reads as prose rather than a signed number
+  // because "+3" alone doesn't say more or less than *what*.
+  const previousLabel = period === "month" ? "last month" : period === "year" ? "last year" : "last period";
+  const deltaHint =
+    countDelta === null ? `across ${activeDays} ${activeDays === 1 ? "day" : "days"}`
+    : countDelta === 0  ? `same as ${previousLabel}`
+    : `${Math.abs(countDelta)} ${countDelta > 0 ? "more" : "fewer"} than ${previousLabel}`;
+
+  // Budget coverage is stated whenever the period spans more months than were
+  // ever given a budget — otherwise the percentage silently measures against a
+  // smaller denominator than the header implies.
+  const budgetHint =
+    budget === null           ? "No budget set for this period"
+    : budgetMonths < months.length ? `of ${fmt(budget)} across ${budgetMonths} of ${months.length} months`
+    : `of ${fmt(budget)} budget`;
+
+  const isOver     = remaining !== null && remaining < 0;
+  const balanceTint = remaining === null ? "var(--color-text-hi)" : isOver ? "#ef4444" : "#34d399";
+
+  const maxCategoryTotal = byCategory.length > 0 ? byCategory[0].total : 0;
+
+  return (
+    <motion.div
+      initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+      className="modal-backdrop"
+      style={{ position: "fixed", inset: 0, background: "rgba(5,7,12,0.88)", zIndex: 200, display: "flex" }}
+      onClick={onClose}>
+      <motion.div ref={sheetRef}
+        initial={sheetMode === "center" ? MODAL_ENTER_CENTER : MODAL_ENTER_SHEET}
+        animate={sheetMode === "center" ? MODAL_ANIM_CENTER  : MODAL_ANIM_SHEET}
+        exit={sheetMode   === "center" ? MODAL_EXIT_CENTER   : MODAL_EXIT_SHEET}
+        transition={{ type: "spring", damping: 28, stiffness: 280 }}
+        className="modal-sheet"
+        role="dialog" aria-modal="true" aria-label="My Report"
+        style={{ background: "var(--color-bg-card)", padding: "24px 20px 48px", width: "100%", border: "1px solid var(--color-border)", maxWidth: 620, margin: "0 auto" }}
+        onClick={(e) => e.stopPropagation()}>
+
+        {sheetMode === "sheet" && <div style={{ width: 36, height: 4, background: "var(--color-border-mid)", borderRadius: 2, margin: "0 auto 20px" }} />}
+
+        {/* ── Title row ── */}
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12, marginBottom: 18 }}>
+          <div style={{ minWidth: 0 }}>
+            <div style={{ fontSize: 22, fontWeight: 800, color: "var(--color-text-hi)", fontFamily: "var(--font-headline)", letterSpacing: "-0.02em", lineHeight: 1.15 }}>
+              My Report
+            </div>
+            <div style={{ fontSize: 12, color: "var(--color-text-lo)", fontFamily: "var(--font-body)", marginTop: 4, lineHeight: 1.4 }}>
+              Your personal spending — {periodSubtitle}.
+            </div>
+          </div>
+          <button aria-label="Close report" onClick={onClose}
+            style={{ background: "var(--color-bg-nav)", border: "none", borderRadius: 9, padding: 8, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+            <X size={16} color="var(--color-text-lo)" strokeWidth={2} />
+          </button>
+        </div>
+
+        {/* ── Period selector ── */}
+        <select
+          aria-label="Report period"
+          value={period}
+          onChange={(e) => onPeriodChange(e.target.value as ReportPeriod)}
+          className="rep-period"
+          style={{
+            background: "var(--color-bg-page)", border: "1px solid var(--color-border-mid)",
+            borderRadius: 10, padding: "9px 12px", cursor: "pointer",
+            color: "var(--color-text-mid)", fontSize: 13, fontWeight: 600,
+            fontFamily: "var(--font-body)", marginBottom: 16,
+          }}>
+          {(Object.keys(PERIOD_LABELS) as ReportPeriod[]).map((p) => (
+            <option key={p} value={p}>{PERIOD_LABELS[p]}</option>
+          ))}
+        </select>
+
+        {count === 0 ? (
+          <div style={{ background: "var(--color-bg-page)", border: "1px solid var(--color-border)", borderRadius: 14, padding: "40px 20px", textAlign: "center" }}>
+            <Receipt size={28} color="var(--color-text-ghost)" strokeWidth={1.6} style={{ marginBottom: 12 }} />
+            <div style={{ fontSize: 14, fontWeight: 600, color: "var(--color-text-lo)", fontFamily: "var(--font-body)" }}>
+              Nothing to report yet
+            </div>
+            <div style={{ fontSize: 12, color: "var(--color-text-ghost)", fontFamily: "var(--font-body)", marginTop: 6, lineHeight: 1.5 }}>
+              No entries in {PERIOD_LABELS[period].toLowerCase()}. Try a wider period.
+            </div>
+          </div>
+        ) : (
+          <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+
+            {/* ── Stat tiles ── */}
+            <div className="rep-tiles">
+              <StatTile
+                label="Entries"
+                value={String(count)}
+                hint={deltaHint}
+              />
+              <StatTile
+                label="Total spent"
+                value={fmt(total)}
+                hint={`avg ${fmt(avg)} each`}
+              />
+              <StatTile
+                label="Budget used"
+                value={budgetUsedPct === null ? "—" : String(Math.round(budgetUsedPct))}
+                unit={budgetUsedPct === null ? undefined : "%"}
+                hint={budgetHint}
+              />
+              <StatTile
+                label={isOver ? "Over budget" : "Remaining"}
+                value={remaining === null ? "—" : fmt(Math.abs(remaining))}
+                hint={
+                  remaining === null ? "Set a budget to track this"
+                  : isOver          ? "past your limit for this period"
+                  : "left to spend this period"
+                }
+              />
+            </div>
+
+            {/* ── Spending by category ── */}
+            <ReportCard
+              title="Spending by category"
+              caption="Most-spent first. Pick one to see those entries.">
+              {byCategory.map((slice, i) => {
+                const meta = CATEGORIES.find((c) => c.id === slice.id)!;
+                // Bars are scaled against the largest category, not the total,
+                // so the shape of the month stays legible when one category
+                // dominates and the rest would otherwise flatten to nothing.
+                const width = maxCategoryTotal > 0 ? (slice.total / maxCategoryTotal) * 100 : 0;
+                return (
+                  <button
+                    key={slice.id}
+                    onClick={() => onPickCategory(slice.id)}
+                    aria-label={`${meta.label}, ${fmt(slice.total)} across ${slice.count} ${slice.count === 1 ? "entry" : "entries"}. Show these entries.`}
+                    style={{
+                      display: "flex", alignItems: "center", gap: 10, width: "100%",
+                      background: "none", border: "none", cursor: "pointer",
+                      padding: "6px 0", textAlign: "left",
+                      marginBottom: i < byCategory.length - 1 ? 6 : 0,
+                    }}>
+                    <span style={{ width: 10, height: 10, borderRadius: 3, background: meta.color, flexShrink: 0 }} />
+                    <span style={{ fontSize: 13, fontWeight: 600, color: "var(--color-text-mid)", fontFamily: "var(--font-body)", width: 68, flexShrink: 0 }}>
+                      {meta.label}
+                    </span>
+                    <span style={{ flex: 1, minWidth: 24, background: "var(--color-bg-nav)", borderRadius: 999, height: 8, overflow: "hidden" }}>
+                      <motion.span
+                        initial={{ width: 0 }} animate={{ width: `${width}%` }}
+                        transition={{ duration: 0.45, delay: i * 0.04, ease: [0.4, 0, 0.2, 1] }}
+                        style={{ display: "block", height: "100%", background: meta.color, borderRadius: 999 }} />
+                    </span>
+                    <span style={{ fontSize: 13, fontWeight: 700, color: meta.color, fontFamily: "var(--font-mono)", flexShrink: 0, minWidth: 62, textAlign: "right" }}>
+                      {fmt(slice.total)}
+                    </span>
+                  </button>
+                );
+              })}
+              <div style={{ fontSize: 11, color: "var(--color-text-lo)", fontFamily: "var(--font-body)", marginTop: 10, opacity: 0.7, lineHeight: 1.45 }}>
+                {(() => {
+                  const top = byCategory[0];
+                  const meta = CATEGORIES.find((c) => c.id === top.id)!;
+                  return `${meta.label} leads at ${Math.round(top.share)}% of spend — ${top.count} ${top.count === 1 ? "entry" : "entries"}, avg ${fmt(top.avg)}.`;
+                })()}
+              </div>
+            </ReportCard>
+
+            {/* ── By size ── */}
+            <ReportCard
+              title="By size"
+              caption={`Every entry counted once — these add up to ${count}.`}>
+              {bySize.map(({ band, count: bandCount }, i) => (
+                <div key={band.id}
+                  style={{ display: "flex", alignItems: "center", gap: 10, padding: "5px 0", marginBottom: i < bySize.length - 1 ? 2 : 0 }}>
+                  <span style={{ width: 9, height: 9, borderRadius: "50%", background: band.color, flexShrink: 0, opacity: bandCount > 0 ? 1 : 0.3 }} />
+                  <span style={{ flex: 1, fontSize: 13, fontWeight: 500, fontFamily: "var(--font-body)", color: bandCount > 0 ? "var(--color-text-mid)" : "var(--color-text-lo)" }}>
+                    {band.label}
+                  </span>
+                  <span style={{ fontSize: 13, fontWeight: 700, fontFamily: "var(--font-mono)", color: bandCount > 0 ? "var(--color-text-hi)" : "var(--color-text-ghost)" }}>
+                    {bandCount}
+                  </span>
+                </div>
+              ))}
+              {currency === "KHR" && (
+                <div style={{ fontSize: 11, color: "var(--color-text-lo)", fontFamily: "var(--font-body)", marginTop: 10, opacity: 0.7 }}>
+                  Bands are USD — the ledger's base currency.
+                </div>
+              )}
+            </ReportCard>
+
+            {/* ── Recent entries ── */}
+            <ReportCard
+              title="Recent entries"
+              caption={count > recent.length ? `Newest ${recent.length} of ${count}.` : "Newest first."}>
+              <div className="rep-row rep-head">
+                <span>Note</span>
+                <span className="rep-cat">Category</span>
+                <span>When</span>
+                <span style={{ textAlign: "right" }}>Amount</span>
+              </div>
+              {recent.map((tx) => {
+                const meta = CATEGORIES.find((c) => c.id === tx.category)!;
+                return (
+                  <div key={tx.id} className="rep-row rep-body">
+                    <span style={{ color: "var(--color-text-hi)", fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                      {tx.note || meta.label}
+                    </span>
+                    <span className="rep-cat" style={{ color: "var(--color-text-lo)" }}>{meta.label}</span>
+                    <span style={{ color: "var(--color-text-lo)", fontFamily: "var(--font-mono)", fontSize: 12 }}>
+                      {formatDisplayDate(dayFromIso(tx.date))}
+                    </span>
+                    <span style={{ textAlign: "right" }}>
+                      <span style={{ background: `${meta.color}1f`, color: meta.color, border: `1px solid ${meta.color}40`, borderRadius: 99, padding: "3px 9px", fontSize: 11.5, fontWeight: 700, fontFamily: "var(--font-mono)", whiteSpace: "nowrap" }}>
+                        {fmt(tx.amountUSD)}
+                      </span>
+                    </span>
+                  </div>
+                );
+              })}
+            </ReportCard>
+          </div>
+        )}
+      </motion.div>
+    </motion.div>
+  );
+}
+
 export default function ApsaraSpendPage() {
   // ── Ledger: Postgres-backed, localStorage-cached ──────────────────────────
   // `data` / `setData` behave exactly like the useState pair they replaced, so
@@ -1024,6 +1314,11 @@ export default function ApsaraSpendPage() {
   const [currency,         setCurrency]         = useState<Currency>("USD");
   const [showSettings,     setShowSettings]     = useState(false);
   const [resetConfirm,     setResetConfirm]     = useState(false);
+  // My Report — a read-only lens over the same ledger. The period lives here
+  // rather than inside the sheet so closing the report and reopening it keeps
+  // the window you were looking at; the sheet unmounts on close.
+  const [showReport,       setShowReport]       = useState(false);
+  const [reportPeriod,     setReportPeriod]     = useState<ReportPeriod>("month");
   const [toast,            setToast]            = useState<Toast | null>(null);
   // L1 — category filter for the Entries list.
   //
@@ -1066,11 +1361,13 @@ export default function ApsaraSpendPage() {
   const budgetModalRef   = useRef<HTMLDivElement>(null);
   const budgetInputRef   = useRef<HTMLInputElement>(null);
   const settingsModalRef = useRef<HTMLDivElement>(null);
+  const reportModalRef   = useRef<HTMLDivElement>(null);
 
   // A2 — activate focus trap whenever these modals are open
   useFocusTrap(budgetModalRef,   showBudgetModal);
 
   useFocusTrap(settingsModalRef, showSettings);
+  useFocusTrap(reportModalRef,   showReport);
   // Q3 — theme mode: system (default) | dark | light
   const [themeMode,        setThemeMode]        = useState<"dark"|"light"|"system">("system");
   // Q4 — colour palette: yellow (default) | indigo | emerald | rose
@@ -1237,7 +1534,7 @@ export default function ApsaraSpendPage() {
   // and also while the non-scrolling init screen is active (spec §1 & §5).
   // Note: use inline balance check to avoid hoisting conflict with isBalanceLocked.
   useEffect(() => {
-    const anyOpen = showModal || showSettings || showPicker || showBudgetModal;
+    const anyOpen = showModal || showSettings || showPicker || showBudgetModal || showReport;
     const nobudget = !(selectedMonth in data.monthlyBalances && data.monthlyBalances[selectedMonth] > 0);
     // Recomputed here rather than reusing monthTxs, which is declared below —
     // the dependency array is evaluated during render, so referencing it would
@@ -1246,7 +1543,7 @@ export default function ApsaraSpendPage() {
     const initActive = isLoaded && nobudget && !monthHasTxs;
     document.body.style.overflow = (anyOpen || initActive) ? "hidden" : "";
     return () => { document.body.style.overflow = ""; };
-  }, [showModal, showSettings, showPicker, showBudgetModal, isLoaded, selectedMonth, data.monthlyBalances, data.transactions]);
+  }, [showModal, showSettings, showPicker, showBudgetModal, showReport, isLoaded, selectedMonth, data.monthlyBalances, data.transactions]);
 
   // ── Derived ──────────────────────────────────────────────────────────────────
   // E2: useMemo — these are the most expensive derivations in the component.
@@ -1310,6 +1607,44 @@ export default function ApsaraSpendPage() {
   const isCurrentMonth  = selectedMonth === todayMonthKey();
   const hasData         = monthTxs.length > 0;
   const hasBreakdown    = categoryTotals.some((c) => c.total > 0);
+
+  // ── My Report ─────────────────────────────────────────────────────────────
+  // Anchored on the month on screen, not on today: opening the report while
+  // looking at May reports on May. Only built while the sheet is open — a
+  // multi-month reduce has no business running on every dashboard render.
+  const report = useMemo(
+    () => (showReport ? buildReport(data.transactions, data.monthlyBalances, reportPeriod, selectedMonth) : null),
+    [showReport, data.transactions, data.monthlyBalances, reportPeriod, selectedMonth],
+  );
+
+  const reportSubtitle = useMemo(() => {
+    if (!report || report.months.length === 0) return "";
+    const label = (key: string) => {
+      const { year: y, month: m } = parseMonthKey(key);
+      return { short: `${MONTHS[m - 1]} ${y}`, full: `${MONTH_FULL[m - 1]} ${y}`, year: y, m };
+    };
+    const first = label(report.months[0]);
+    const last  = label(report.months[report.months.length - 1]);
+    if (report.months.length === 1) return last.full;
+    // Same year needs the year printed once, at the end: "May – Jul 2026".
+    return first.year === last.year
+      ? `${MONTHS[first.m - 1]} – ${MONTHS[last.m - 1]} ${last.year}`
+      : `${first.short} – ${last.short}`;
+  }, [report]);
+
+  // Tapping a category bar is a jump back to the dashboard with that filter on.
+  // The filter only describes the month on screen, so a category the report
+  // found in *another* month has nothing to select here — say so rather than
+  // closing onto a list that silently ignored the tap.
+  const handleReportCategory = useCallback((cat: CategoryId) => {
+    const label = CATEGORIES.find((c) => c.id === cat)?.label ?? "Those";
+    if (!monthTxs.some((t) => t.category === cat)) {
+      showToast(`No ${label} entries in ${MONTH_FULL[parseMonthKey(selectedMonth).month - 1]}.`, "info");
+      return;
+    }
+    setShowReport(false);
+    setFilterCategory(cat);
+  }, [monthTxs, selectedMonth, setFilterCategory, showToast]);
 
   // P1 — Spending guardrail derived values
   // monthBalance: the locked budget for this month (0 = not set)
@@ -2308,6 +2643,45 @@ export default function ApsaraSpendPage() {
           .date-input { width: auto; min-width: 200px; }
         }
 
+        /* ── My Report ────────────────────────────────────────────────────── */
+        /* Native select, restyled: the platform picker is a better control on  */
+        /* iOS than anything rebuilt in JS, and it is keyboard-accessible free. */
+        .rep-period {
+          -webkit-appearance: none; appearance: none;
+          padding-right: 30px !important;
+          background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%2394a3b8' stroke-width='3' stroke-linecap='round'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
+          background-repeat: no-repeat;
+          background-position: right 11px center;
+        }
+
+        /* Tiles: 2×2 on mobile, one row of 4 once there is width for it. */
+        .rep-tiles { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+        @media (min-width: 560px) {
+          .rep-tiles { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+        }
+
+        /* Recent entries. The category column is the one that can go: it is    */
+        /* already encoded in the amount pill's colour, so dropping it on narrow */
+        /* screens costs nothing and keeps the note from truncating to nothing.  */
+        .rep-row {
+          display: grid;
+          grid-template-columns: minmax(0, 1fr) auto auto;
+          align-items: center; gap: 10px;
+          padding: 9px 0;
+          font-family: var(--font-body); font-size: 13px;
+        }
+        .rep-row .rep-cat { display: none; }
+        @media (min-width: 560px) {
+          .rep-row { grid-template-columns: minmax(0, 1fr) 80px 108px 84px; }
+          .rep-row .rep-cat { display: block; }
+        }
+        .rep-head {
+          font-size: 10px; font-weight: 600; letter-spacing: 0.07em;
+          text-transform: uppercase; color: var(--color-text-lo); opacity: 0.6;
+          border-bottom: 1px solid var(--color-border); padding-top: 0; padding-bottom: 8px;
+        }
+        .rep-body + .rep-body { border-top: 0.5px solid var(--color-border); }
+
         /* ── D6  Swipe hint fade-in — 800ms delay after dashboard renders ─ */
         @keyframes hintFade { from { opacity: 0; } to { opacity: 1; } }
         .swipe-hint { animation: hintFade 0.5s ease 0.8s both; }
@@ -2565,11 +2939,17 @@ export default function ApsaraSpendPage() {
               </div>
             </div>
             )}
-            {/* Settings button always visible */}
-            <button aria-label="Open settings" onClick={() => setShowSettings(true)}
-              style={{ background: "var(--color-bg-nav)", border: "1px solid var(--color-border-mid)", borderRadius: 12, padding: 12, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", minWidth: 44, minHeight: 44, marginTop: 4 }}>
-              <Settings className="icon-nav" color="var(--color-text-lo)" strokeWidth={1.8} />
-            </button>
+            {/* Report + Settings — always visible */}
+            <div style={{ display: "flex", gap: 8, flexShrink: 0 }}>
+              <button aria-label="Open my report" onClick={() => setShowReport(true)}
+                style={{ background: "var(--color-bg-nav)", border: "1px solid var(--color-border-mid)", borderRadius: 12, padding: 12, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", minWidth: 44, minHeight: 44, marginTop: 4 }}>
+                <BarChart3 className="icon-nav" color="var(--color-text-lo)" strokeWidth={1.8} />
+              </button>
+              <button aria-label="Open settings" onClick={() => setShowSettings(true)}
+                style={{ background: "var(--color-bg-nav)", border: "1px solid var(--color-border-mid)", borderRadius: 12, padding: 12, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", minWidth: 44, minHeight: 44, marginTop: 4 }}>
+                <Settings className="icon-nav" color="var(--color-text-lo)" strokeWidth={1.8} />
+              </button>
+            </div>
           </div>
 
           {/* ════ MONTH NAV ════ */}
@@ -2988,6 +3368,22 @@ export default function ApsaraSpendPage() {
                 </button>
               </motion.div>
             </motion.div>
+          )}
+
+          {/* ── My Report sheet ── */}
+          {showReport && report && (
+            <ReportSheet
+              report={report}
+              period={reportPeriod}
+              onPeriodChange={setReportPeriod}
+              periodSubtitle={reportSubtitle}
+              fmt={fmt}
+              currency={currency}
+              onPickCategory={handleReportCategory}
+              onClose={() => setShowReport(false)}
+              sheetMode={pageModalMode}
+              sheetRef={reportModalRef}
+            />
           )}
 
           {/* ── Settings sheet ── */}
