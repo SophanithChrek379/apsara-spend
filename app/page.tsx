@@ -7,6 +7,7 @@ import {
   UtensilsCrossed, Bike, Zap, Users, ShoppingBag, MoreHorizontal,
   CalendarDays, Lightbulb, Lock, Check, AlertTriangle, Circle, Pencil, Receipt,
   Download, FileText,
+  Cloud, CloudOff, UploadCloud, RefreshCw,
   type LucideIcon,
 } from "lucide-react";
 
@@ -15,7 +16,7 @@ import {
 // Currency / CategoryId / Transaction / AppData now live in lib/types.ts so the
 // route handlers validate against the exact same shapes the UI produces.
 import type { Currency, CategoryId, Transaction, AppData } from "@/lib/types";
-import { useSyncedLedger, newTransactionId } from "@/lib/ledger/useSyncedLedger";
+import { useSyncedLedger, newTransactionId, type SyncStatus, type SyncResult } from "@/lib/ledger/useSyncedLedger";
 import { downloadBackupJson, downloadCsv } from "@/lib/ledger/export";
 
 // Use the official LucideIcon type so Lucide component props align exactly
@@ -912,6 +913,84 @@ function EntryModal({ tx, selectedMonth, monthBalance, totalUSD: currentTotal, c
   );
 }
 
+// ─── Sync status pill ─────────────────────────────────────────────────────────
+/**
+ * The only visible surface for a sync layer that is otherwise entirely silent.
+ * Syncing is automatic — on boot, after every edit, on reconnect, on refocus —
+ * so this reports far more than it commands. Tapping forces a round trip, which
+ * is what you want the first time a device pushes an existing ledger up: you can
+ * watch it land and read the row count back.
+ *
+ * Deliberately shows "Synced" at rest rather than hiding. With anonymous auth
+ * there is no account screen to confirm against, so this pill is the only place
+ * the app ever admits whether the data exists anywhere but this phone.
+ */
+function SyncPill({ status, pendingCount, onSync }: {
+  status: SyncStatus;
+  pendingCount: number;
+  onSync: () => Promise<SyncResult>;
+}) {
+  const [busy, setBusy] = useState(false);
+
+  const run = async () => {
+    if (busy) return;
+    setBusy(true);
+    try { await onSync(); } finally { setBusy(false); }
+  };
+
+  const view =
+    busy || status === "loading"
+      ? { Icon: RefreshCw,  label: "Syncing…",   color: "var(--color-text-lo)", bg: "transparent",         border: "transparent",     spin: true }
+    : status === "pending"
+      ? { Icon: UploadCloud, label: pendingCount > 0 ? `${pendingCount} to sync` : "Pending",
+                                                 color: "var(--accent)",        bg: "var(--accent-muted)", border: "var(--accent-border)", spin: false }
+    : status === "offline"
+      ? { Icon: CloudOff,   label: "Offline",    color: "var(--color-text-lo)", bg: "transparent",         border: "transparent",     spin: false }
+    : status === "error"
+      ? { Icon: AlertTriangle, label: "Sync failed", color: "#ef4444",          bg: "#ef444418",           border: "#ef444440",       spin: false }
+      : { Icon: Cloud,      label: "Synced",     color: "var(--color-text-lo)", bg: "transparent",         border: "transparent",     spin: false };
+
+  const { Icon } = view;
+
+  return (
+    <button
+      onClick={run}
+      disabled={busy}
+      aria-label={`Sync status: ${view.label}. Tap to sync now.`}
+      aria-live="polite"
+      style={{
+        display: "inline-flex", alignItems: "center", gap: 4,
+        background: view.bg,
+        border: `1px solid ${view.border}`,
+        color: view.color,
+        borderRadius: 99,
+        padding: "5px 9px",
+        minHeight: 28,
+        fontSize: 10,
+        fontWeight: 600,
+        letterSpacing: "0.04em",
+        fontFamily: "var(--font-body)",
+        cursor: busy ? "default" : "pointer",
+        opacity: view.spin ? 0.75 : 1,
+        transition: "opacity 0.2s, background 0.2s",
+        whiteSpace: "nowrap",
+      }}
+    >
+      {view.spin ? (
+        <motion.span
+          animate={{ rotate: 360 }}
+          transition={{ repeat: Infinity, duration: 0.9, ease: "linear" }}
+          style={{ display: "inline-flex" }}>
+          <Icon size={11} strokeWidth={2.4} />
+        </motion.span>
+      ) : (
+        <Icon size={11} strokeWidth={2.4} />
+      )}
+      {view.label}
+    </button>
+  );
+}
+
 export default function ApsaraSpendPage() {
   // ── Ledger: Postgres-backed, localStorage-cached ──────────────────────────
   // `data` / `setData` behave exactly like the useState pair they replaced, so
@@ -922,6 +1001,7 @@ export default function ApsaraSpendPage() {
     setData,
     isLoaded,
     status: syncStatus,
+    pendingCount,
     cacheCorrupted,
     syncNow,
   } = useSyncedLedger();
@@ -1012,6 +1092,33 @@ export default function ApsaraSpendPage() {
   useEffect(() => {
     if (cacheCorrupted) showToast("Cached data could not be read — reloading from the server.", "warn");
   }, [cacheCorrupted, showToast]);
+
+  // ── Manual sync ───────────────────────────────────────────────────────────
+  // Answers the one question the UI otherwise can't: "is my data actually on the
+  // server?" Reports the count the server holds afterwards, which is the number
+  // to check against Supabase → Table Editor when importing a device's history.
+  const handleSyncNow = useCallback(async (): Promise<SyncResult> => {
+    const r = await syncNow();
+    const entries = (n: number) => `${n} ${n === 1 ? "entry" : "entries"}`;
+
+    if (r.ok) {
+      showToast(
+        r.pushed > 0
+          ? `Synced ${r.pushed} ${r.pushed === 1 ? "change" : "changes"} — ${entries(r.total)} in the cloud.`
+          : `Up to date — ${entries(r.total)} in the cloud.`,
+        "success",
+      );
+    } else if (r.reason === "offline") {
+      showToast("You're offline — saved on this device, will sync automatically.", "info");
+    } else if (r.reason === "unauthenticated") {
+      showToast("Can't reach the server — working from this device only.", "warn");
+    } else if (r.reason === "error") {
+      // No retry action: the pill itself turns into the retry affordance.
+      showToast("Sync failed — your data is safe on this device.", "warn");
+    }
+    // "busy" means a sync is already in flight and will re-run. Nothing to say.
+    return r;
+  }, [syncNow, showToast]);
 
   // Surface a persistent sync failure once, with a retry affordance. Offline is
   // deliberately silent: the app is built to work that way, so it isn't news.
@@ -2381,8 +2488,9 @@ export default function ApsaraSpendPage() {
               <h1 style={{ fontSize: 32, fontWeight: 800, letterSpacing: "-0.02em", margin: 0, color: "var(--color-text-hi)", fontFamily: "var(--font-headline)", lineHeight: 1.1 }}>
                 Apsara <span style={{ color: "var(--accent)" }}>Spend</span>
               </h1>
-              <div style={{ fontSize: 11, color: "var(--color-text-lo)", letterSpacing: "0.06em", marginTop: 6, fontFamily: "var(--font-body)", display: "flex", alignItems: "center", gap: 8 }}>
-                1 USD = 4,000 ៛ · Fixed rate
+              <div style={{ fontSize: 11, color: "var(--color-text-lo)", letterSpacing: "0.06em", marginTop: 4, fontFamily: "var(--font-body)", display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                1 USD = 4,000 ៛
+                <SyncPill status={syncStatus} pendingCount={pendingCount} onSync={handleSyncNow} />
               </div>
             </div>
             )}

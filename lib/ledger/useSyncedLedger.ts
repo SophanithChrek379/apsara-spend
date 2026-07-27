@@ -10,6 +10,19 @@ import { fetchLedger, pushOps, ApiError } from "@/lib/ledger/api";
 
 export type SyncStatus = "loading" | "synced" | "pending" | "offline" | "error";
 
+/**
+ * What a manual "Sync now" tap resolves to, so the UI can report something
+ * concrete ("143 entries in the cloud") instead of a generic spinner.
+ */
+export interface SyncResult {
+  ok: boolean;
+  /** Ops actually sent this round. 0 with ok:true means "already up to date". */
+  pushed: number;
+  /** Transactions the server holds afterwards. */
+  total: number;
+  reason?: "offline" | "unauthenticated" | "busy" | "error";
+}
+
 /** crypto.randomUUID needs a secure context; this keeps http:// LAN testing working. */
 const newUuid = (): string => {
   if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
@@ -45,12 +58,15 @@ const DEBOUNCE_MS = 400;
  * localStorage in the loop.
  */
 export function useSyncedLedger() {
-  const initial = useRef<{ data: AppData; corrupted: boolean }>();
+  const initial = useRef<{ data: AppData; corrupted: boolean; absent: boolean }>();
   if (!initial.current) {
     const { data, corrupted } = typeof window === "undefined"
       ? { data: null, corrupted: false }
       : readCache();
-    initial.current = { data: data ?? defaultData(), corrupted };
+    // `absent` = the cache slot yielded nothing, whether missing or unreadable.
+    // Distinct from "read fine and holds zero rows", which is a legitimate state
+    // (the user deleted everything) and must still be allowed to sync.
+    initial.current = { data: data ?? defaultData(), corrupted, absent: data === null };
   }
 
   const [data, setDataRaw]   = useState<AppData>(initial.current.data);
@@ -76,17 +92,26 @@ export function useSyncedLedger() {
   }, []);
 
   /** Push pending ops, then adopt server state unless the user wrote meanwhile. */
-  const sync = useCallback(async (opts: { pull?: boolean } = {}) => {
+  const sync = useCallback(async (opts: { pull?: boolean } = {}): Promise<SyncResult> => {
+    const localTotal = () => dataRef.current.transactions.length;
+
     if (typeof navigator !== "undefined" && navigator.onLine === false) {
-      setStatus(diffLedger(snapshotRef.current, dataRef.current).length > 0 ? "pending" : "offline");
-      return;
+      const pending = diffLedger(snapshotRef.current, dataRef.current).length;
+      setStatus(pending > 0 ? "pending" : "offline");
+      return { ok: false, pushed: 0, total: localTotal(), reason: "offline" };
     }
-    if (syncingRef.current) { resyncRef.current = true; return; }
+    if (syncingRef.current) {
+      resyncRef.current = true;
+      return { ok: false, pushed: 0, total: localTotal(), reason: "busy" };
+    }
     syncingRef.current = true;
 
     try {
       const userId = await ensureSession();
-      if (!userId) { setStatus("offline"); return; }
+      if (!userId) {
+        setStatus("offline");
+        return { ok: false, pushed: 0, total: localTotal(), reason: "unauthenticated" };
+      }
 
       const revAtStart = revRef.current;
       const local      = dataRef.current;
@@ -110,12 +135,14 @@ export function useSyncedLedger() {
           writeSnapshot(ledger);
           resyncRef.current = true;
         }
-      } else {
-        snapshotRef.current = local;
-        writeSnapshot(local);
-        setPendingCount(0);
-        setStatus("synced");
+        return { ok: true, pushed: ops.length, total: ledger.transactions.length };
       }
+
+      snapshotRef.current = local;
+      writeSnapshot(local);
+      setPendingCount(0);
+      setStatus("synced");
+      return { ok: true, pushed: ops.length, total: local.transactions.length };
     } catch (err) {
       const offline = typeof navigator !== "undefined" && navigator.onLine === false;
       if (offline) setStatus("pending");
@@ -124,6 +151,12 @@ export function useSyncedLedger() {
         console.warn("[ledger] sync failed:", err);
         setStatus("error");
       }
+      return {
+        ok: false,
+        pushed: 0,
+        total: localTotal(),
+        reason: offline ? "offline" : err instanceof ApiError && err.status === 401 ? "unauthenticated" : "error",
+      };
     } finally {
       syncingRef.current = false;
       if (resyncRef.current) {
@@ -175,6 +208,27 @@ export function useSyncedLedger() {
           }
 
           localStorage.setItem(MIGRATED_KEY, "1");
+        }
+
+        // A cache that read as nothing is NOT "the user deleted everything".
+        // Diffing an empty ledger against a populated snapshot emits a deleteTx
+        // per row and would wipe the server on the next flush. A genuine
+        // delete-all leaves a *valid* cache holding zero rows, which still
+        // syncs normally — only a missing or corrupt slot lands here.
+        const snapshotHasRows =
+          snapshotRef.current.transactions.length > 0 ||
+          Object.keys(snapshotRef.current.monthlyBalances).length > 0;
+
+        if (initial.current!.absent && snapshotHasRows) {
+          console.warn("[ledger] cache lost but snapshot has rows — pulling instead of pushing deletes");
+          const ledger = await fetchLedger();
+          if (cancelled) return;
+          snapshotRef.current = ledger;
+          writeSnapshot(ledger);
+          setDataRaw(ledger);
+          writeCache(ledger);
+          setStatus("synced");
+          return;
         }
 
         // Pre-existing data is now just a pending diff against an empty
