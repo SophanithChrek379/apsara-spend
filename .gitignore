@@ -22,6 +22,9 @@ yarn-error.log*
 # Vercel
 .vercel
 
+# Claude Code local state — includes git worktrees with their own build output
+.claude/
+
 # TypeScript
 *.tsbuildinfo
 next-env.d.ts
