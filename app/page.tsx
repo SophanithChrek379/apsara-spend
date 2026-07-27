@@ -11,25 +11,13 @@ import {
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-type Currency   = "USD" | "KHR";
-type CategoryId = "food" | "transpo" | "bills" | "social" | "shop" | "misc";
+// Currency / CategoryId / Transaction / AppData now live in lib/types.ts so the
+// route handlers validate against the exact same shapes the UI produces.
+import type { Currency, CategoryId, Transaction, AppData } from "@/lib/types";
+import { useSyncedLedger, newTransactionId } from "@/lib/ledger/useSyncedLedger";
+
 // Use the official LucideIcon type so Lucide component props align exactly
 type IconComp   = LucideIcon;
-
-interface Transaction {
-  id: string;
-  amountUSD: number;
-  category: CategoryId;
-  note: string;
-  date: string; // ISO local-midnight
-}
-
-interface AppData {
-  schema_version: number;   // D3 — incremented when shape changes; used for migration detection
-  transactions: Transaction[];
-  // O1 — per-month user-set budgets: key = "YYYY-MM", value = USD amount
-  monthlyBalances: Record<string, number>;
-}
 
 interface Toast {
   msg: string;
@@ -42,9 +30,7 @@ interface Toast {
 const EXCHANGE_RATE  = 4000;
 const MAX_AMOUNT_USD = 9_999.99;
 const KHR_STEP       = 100;
-const STORAGE_KEY    = "apsara_spend_v2";
-const SCHEMA_VERSION = 2; // D3 — bump when AppData shape changes
-const MONTHS         = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+const MONTHS       = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
 const MONTH_FULL     = ["January","February","March","April","May","June","July","August","September","October","November","December"];
 
 // Legacy constants kept for any remaining direct references.
@@ -64,7 +50,9 @@ const CATEGORIES: { id: CategoryId; label: string; Icon: IconComp; color: string
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 const pin2 = (v: number) => Math.round(v * 100) / 100;
-const genId = () => `${Date.now()}${Math.random().toString(36).substr(2, 9)}`;
+// Transaction ids are now uuids — the DB primary key type, and stable enough to
+// use as an optimistic-UI key before the row is confirmed by the server.
+const genId = newTransactionId;
 
 const toMonthKey = (y: number, m: number) =>
   `${y}-${String(m).padStart(2, "0")}`;
@@ -142,73 +130,11 @@ const isValidKHR = (raw: string): boolean => {
 };
 
 // ─── Storage ──────────────────────────────────────────────────────────────────
-
-// D3 — Schema validation with version check.
-// schema_version is optional so v1 data (no version field) hydrates safely.
-// Transactions array and monthlyBalances object shape are always validated.
-const isValidAppData = (val: unknown): val is AppData => {
-  if (!val || typeof val !== "object") return false;
-  const obj = val as Record<string, unknown>;
-  if (!Array.isArray(obj.transactions)) return false;
-  if (obj.monthlyBalances !== undefined && typeof obj.monthlyBalances !== "object") return false;
-  // Detect schema version mismatch (future migrations)
-  if (obj.schema_version !== undefined && typeof obj.schema_version !== "number") return false;
-  return true;
-};
-
-const loadData = (): { data: AppData | null; corrupted: boolean } => {
-  try {
-    const raw = typeof window !== "undefined" ? localStorage.getItem(STORAGE_KEY) : null;
-    if (!raw) return { data: null, corrupted: false };
-
-    // Parse as unknown first so we can read storage-only fields before type narrowing
-    const parsed = JSON.parse(raw) as Record<string, unknown>;
-
-    // D3 — Integrity check: if tx_count sentinel was written, verify it matches
-    // the actual transactions array length. Mismatch = partial/corrupted write.
-    const storedCount = parsed.tx_count;
-    const txArray     = parsed.transactions;
-    if (
-      typeof storedCount === "number" &&
-      Array.isArray(txArray) &&
-      storedCount !== txArray.length
-    ) {
-      return { data: null, corrupted: true };
-    }
-
-    if (!isValidAppData(parsed)) return { data: null, corrupted: true };
-
-    return {
-      data: {
-        schema_version:  SCHEMA_VERSION,
-        transactions:    parsed.transactions,
-        monthlyBalances: (parsed.monthlyBalances as Record<string, number>) ?? {},
-      },
-      corrupted: false,
-    };
-  } catch {
-    return { data: null, corrupted: true };
-  }
-};
-
-const saveData = (data: AppData): boolean => {
-  try {
-    // D3 — Write schema_version and tx_count alongside typed data.
-    // tx_count is storage-only metadata (not in AppData interface) — cast to any for serialisation.
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const payload: any = {
-      ...data,
-      schema_version: SCHEMA_VERSION,
-      tx_count: data.transactions.length,
-    };
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
-    return true;
-  } catch {
-    return false;
-  }
-};
-
-const defaultData = (): AppData => ({ schema_version: SCHEMA_VERSION, transactions: [], monthlyBalances: {} });
+//
+// The ledger now lives in Postgres (see supabase/migrations/0001_ledger.sql).
+// localStorage is a read-through cache only — the load/save/validate helpers
+// that used to sit here moved to lib/ledger/cache.ts, and useSyncedLedger()
+// owns hydration, the debounced cache write, and pushing changes to the API.
 
 // ─── CategoryIcon ─────────────────────────────────────────────────────────────
 
@@ -985,7 +911,19 @@ function EntryModal({ tx, selectedMonth, monthBalance, totalUSD: currentTotal, c
 }
 
 export default function ApsaraSpendPage() {
-  const [isLoaded,         setIsLoaded]         = useState(false);
+  // ── Ledger: Postgres-backed, localStorage-cached ──────────────────────────
+  // `data` / `setData` behave exactly like the useState pair they replaced, so
+  // every handler and undo closure below is unchanged. The hook hydrates from
+  // cache on frame one, then reconciles with the API in the background.
+  const {
+    data,
+    setData,
+    isLoaded,
+    status: syncStatus,
+    cacheCorrupted,
+    syncNow,
+  } = useSyncedLedger();
+
   // K3 — Splash is shown until isLoaded fires + 400ms grace period.
   // Covers localStorage hydration so user never sees an empty/default-state flash.
   const [showSplash,       setShowSplash]       = useState(true);
@@ -998,15 +936,6 @@ export default function ApsaraSpendPage() {
     return window.innerWidth >= 768 ? "center" as const : "sheet" as const;
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-  const [data, setData] = useState<AppData>(() => {
-    try {
-      const result = loadData();
-      return result.data ?? defaultData();
-    } catch {
-      return defaultData();
-    }
-  });
-  const [storageCorrupted, setStorageCorrupted] = useState(false);
   const [selectedMonth,    setSelectedMonth]    = useState(todayMonthKey());
   const [swipeDir,         setSwipeDir]         = useState<1 | -1>(1);
   const [showPicker,       setShowPicker]       = useState(false);
@@ -1076,16 +1005,22 @@ export default function ApsaraSpendPage() {
     setTimeout(() => setToast(null), duration);
   }, []);
 
+  // Hydration, the debounced write and the API push all live in
+  // useSyncedLedger() now. Only the user-facing messaging stays here.
   useEffect(() => {
-    const { data: saved, corrupted } = loadData();
-    if (corrupted) setStorageCorrupted(true);
-    else if (saved) setData(saved);
-    setIsLoaded(true);
-  }, []);
+    if (cacheCorrupted) showToast("Cached data could not be read — reloading from the server.", "warn");
+  }, [cacheCorrupted, showToast]);
 
+  // Surface a persistent sync failure once, with a retry affordance. Offline is
+  // deliberately silent: the app is built to work that way, so it isn't news.
+  const syncWarnedRef = useRef(false);
   useEffect(() => {
-    if (storageCorrupted) showToast("Previous data could not be loaded — storage was corrupted.", "warn");
-  }, [storageCorrupted, showToast]);
+    if (syncStatus === "error" && !syncWarnedRef.current) {
+      syncWarnedRef.current = true;
+      showToast("Could not reach the server — changes are saved locally.", "warn", syncNow);
+    }
+    if (syncStatus === "synced") syncWarnedRef.current = false;
+  }, [syncStatus, showToast, syncNow]);
 
   // K2 — Auto-dismiss splash: 200ms after data is loaded (was 400ms — SP1 fix).
   // 200ms is enough for the exit animation to start cleanly; faster on cached loads.
@@ -1108,22 +1043,10 @@ export default function ApsaraSpendPage() {
     return () => clearTimeout(hard);
   }, []);
 
-  // D1 — Debounced localStorage write: state updates are instant (React),
-  // but disk writes are batched every 300ms to prevent write-storm on rapid
-  // entries. "Add Expense" feels instantaneous — the UI updates on the same
-  // frame, the persistence happens 300ms later in the background.
-  const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  useEffect(() => {
-    if (!isLoaded) return;
-    if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
-    saveTimerRef.current = setTimeout(() => {
-      const ok = saveData(data);
-      if (!ok) showToast("Storage quota exceeded — data may not be saved.", "warn");
-    }, 300);
-    return () => {
-      if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
-    };
-  }, [data, isLoaded, showToast]);
+  // D1 — The debounced write survives, but it now lives in useSyncedLedger():
+  // one 400ms timer writes the localStorage cache AND pushes the diff to
+  // /api/sync, so "Add Expense" still repaints on the same frame while both
+  // persistence layers happen in the background.
 
   // Q3/T3 — Apply theme mode to <html data-theme="...">
   // System mode watches prefers-color-scheme and updates live.
