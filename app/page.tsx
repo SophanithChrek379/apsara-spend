@@ -18,6 +18,7 @@ import {
 import type { Currency, CategoryId, Transaction, AppData } from "@/lib/types";
 import { useSyncedLedger, newTransactionId, type SyncStatus, type SyncResult } from "@/lib/ledger/useSyncedLedger";
 import { downloadBackupJson, downloadCsv } from "@/lib/ledger/export";
+import { isoFromDay, dayFromIso, monthKeyFromIso, todayDay } from "@/lib/calendar-day";
 
 // Use the official LucideIcon type so Lucide component props align exactly
 type IconComp   = LucideIcon;
@@ -70,9 +71,10 @@ const todayMonthKey = () => {
   return toMonthKey(n.getFullYear(), n.getMonth() + 1);
 };
 
-// § C-02/M-01  Local-time date — avoids UTC offset shifting the date in UTC+7
-const localDateString = (d = new Date()): string =>
-  `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+// "Today" as this device reckons it. Only ever applied to the *clock* — a
+// stored transaction date is a calendar day and is read with dayFromIso, never
+// re-projected through the local timezone. See lib/calendar-day.ts.
+const localDateString = todayDay;
 
 // J2 — Human-readable date label: "2026-04-09" → "09 Apr 2026"
 // Uses T12:00:00 (local noon) so no DST/TZ edge case can shift to the
@@ -404,11 +406,7 @@ function EntryModal({ tx, selectedMonth, monthBalance, totalUSD: currentTotal, c
 }) {
   const isEdit = !!tx;
 
-  // K1 FIX — localDateString(new Date(tx.date)) reads the local calendar date.
-  // tx?.date.slice(0,10) read the UTC ISO string: in Cambodia (UTC+7), a
-  // transaction saved at local midnight "2026-04-09T00:00:00" is stored as
-  // "2026-04-08T17:00:00.000Z", so slice gave "2026-04-08" — one day behind.
-  const defaultDate = tx ? localDateString(new Date(tx.date)) : (() => {
+  const defaultDate = tx ? dayFromIso(tx.date) : (() => {
     const { year: ym, month: mm } = parseMonthKey(selectedMonth);
     const todayLocal  = localDateString();
     const todayPrefix = `${String(ym)}-${String(mm).padStart(2, "0")}`;
@@ -499,7 +497,7 @@ function EntryModal({ tx, selectedMonth, monthBalance, totalUSD: currentTotal, c
       amountUSD: toUSD(rawAmount),
       category:  cat,
       note:      sanitizeText(note) || catLabel,
-      date:      new Date(`${date}T00:00:00`).toISOString(),
+      date:      isoFromDay(date),
     });
     onClose();
   };
@@ -1244,10 +1242,7 @@ export default function ApsaraSpendPage() {
     // Recomputed here rather than reusing monthTxs, which is declared below —
     // the dependency array is evaluated during render, so referencing it would
     // hit the temporal dead zone.
-    const monthHasTxs = data.transactions.some((t) => {
-      const d = new Date(t.date);
-      return toMonthKey(d.getFullYear(), d.getMonth() + 1) === selectedMonth;
-    });
+    const monthHasTxs = data.transactions.some((t) => monthKeyFromIso(t.date) === selectedMonth);
     const initActive = isLoaded && nobudget && !monthHasTxs;
     document.body.style.overflow = (anyOpen || initActive) ? "hidden" : "";
     return () => { document.body.style.overflow = ""; };
@@ -1260,10 +1255,7 @@ export default function ApsaraSpendPage() {
   // re-sorts and re-reduces on the full transaction array.
 
   const monthTxs = useMemo(() =>
-    data.transactions.filter((t) => {
-      const d = new Date(t.date);
-      return toMonthKey(d.getFullYear(), d.getMonth() + 1) === selectedMonth;
-    }),
+    data.transactions.filter((t) => monthKeyFromIso(t.date) === selectedMonth),
     [data.transactions, selectedMonth]
   );
 
@@ -1497,17 +1489,11 @@ export default function ApsaraSpendPage() {
 
   const handleResetMonth = () => {
     // Snapshot deleted data before wiping so Undo can restore
-    const deletedTxs = data.transactions.filter((t) => {
-      const dt = new Date(t.date);
-      return toMonthKey(dt.getFullYear(), dt.getMonth() + 1) === selectedMonth;
-    });
+    const deletedTxs = data.transactions.filter((t) => monthKeyFromIso(t.date) === selectedMonth);
     const deletedBalance = data.monthlyBalances[selectedMonth];
 
     setData((d) => {
-      const transactions = d.transactions.filter((t) => {
-        const dt = new Date(t.date);
-        return toMonthKey(dt.getFullYear(), dt.getMonth() + 1) !== selectedMonth;
-      });
+      const transactions = d.transactions.filter((t) => monthKeyFromIso(t.date) !== selectedMonth);
       const monthlyBalances = { ...d.monthlyBalances };
       delete monthlyBalances[selectedMonth];
       return { ...d, transactions, monthlyBalances };
@@ -1820,8 +1806,8 @@ export default function ApsaraSpendPage() {
           <>
             {visible.map((tx, i) => {
             const cat      = CATEGORIES.find((c) => c.id === tx.category) ?? CATEGORIES[5];
-            const dateStr  = formatDisplayDate(localDateString(new Date(tx.date)));
-            const txDate   = localDateString(new Date(tx.date));
+            const txDate   = dayFromIso(tx.date);
+            const dateStr  = formatDisplayDate(txDate);
             const isFirst  = !seenDates.has(txDate);
             if (isFirst) seenDates.add(txDate);
             const isLast   = i === visible.length - 1 && !hasMore;
@@ -2850,7 +2836,7 @@ export default function ApsaraSpendPage() {
                     </div>
                   )}
                   <div style={{ fontSize: 12, color: "var(--color-text-lo)", fontFamily: "var(--font-body)", marginBottom: 14 }}>
-                    {cat?.label} · {formatDisplayDate(localDateString(new Date(confirmDeleteTx.date)))}
+                    {cat?.label} · {formatDisplayDate(dayFromIso(confirmDeleteTx.date))}
                   </div>
                   <div style={{ display: "inline-flex", alignItems: "center", gap: 6, background: "var(--color-bg-page)", border: "1px solid var(--color-border)", borderRadius: 99, padding: "5px 12px" }}>
                     <div style={{ width: 6, height: 6, borderRadius: "50%", background: "#34d399", flexShrink: 0 }} />

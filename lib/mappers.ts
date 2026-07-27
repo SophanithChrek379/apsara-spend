@@ -4,27 +4,19 @@ import type {
   MonthlyBudgetRow,
   CategoryId,
 } from "@/lib/types";
+import { dayFromIso, isoFromDay, monthKeyFromIso } from "@/lib/calendar-day";
 
 /**
- * Local calendar day for a stored ISO timestamp.
- *
- * The client writes `new Date("YYYY-MM-DDT00:00:00").toISOString()` — local
- * midnight expressed in UTC. In UTC+7 that lands on the *previous* UTC day, so
- * naively slicing the ISO string (or casting it to a Postgres date) shifts the
- * expense back a day. Reading the local components is what round-trips.
+ * Calendar day ⇄ stored ISO date. Both directions are timezone-independent —
+ * see lib/calendar-day.ts for why they have to be. These ran server-side with
+ * *local* components before, and Node on Vercel is UTC, so a day picked in
+ * Cambodia was persisted one day early.
  */
-export const toSpentOn = (isoDate: string): string => {
-  const d = new Date(isoDate);
-  if (Number.isNaN(d.getTime())) return "";
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-};
+export const toSpentOn   = (isoDate: string): string => dayFromIso(isoDate);
+export const fromSpentOn = (spentOn: string): string => isoFromDay(spentOn);
 
-/** Inverse of toSpentOn: "YYYY-MM-DD" → local-midnight ISO string. */
-export const fromSpentOn = (spentOn: string): string =>
-  new Date(`${spentOn}T00:00:00`).toISOString();
-
-/** Month key ("YYYY-MM") for a stored ISO timestamp, using local components. */
-export const monthKeyOf = (isoDate: string): string => toSpentOn(isoDate).slice(0, 7);
+/** Month key ("YYYY-MM") for a stored ISO date. */
+export const monthKeyOf = (isoDate: string): string => monthKeyFromIso(isoDate);
 
 export const rowToTransaction = (row: TransactionRow): Transaction => ({
   id:        row.id,

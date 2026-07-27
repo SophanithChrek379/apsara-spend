@@ -1,5 +1,6 @@
-import type { AppData } from "@/lib/types";
+import type { AppData, Transaction } from "@/lib/types";
 import { SCHEMA_VERSION, STORAGE_KEY } from "@/lib/constants";
+import { canonicalizeIso } from "@/lib/calendar-day";
 
 /**
  * localStorage is now a read-through cache, not the source of truth. Two slots:
@@ -40,6 +41,18 @@ export const isValidAppData = (val: unknown): val is AppData => {
   return true;
 };
 
+/**
+ * Rewrites a legacy local-midnight `date` to the canonical noon-UTC form.
+ *
+ * Applied to BOTH slots. Migrating only the cache would leave every row looking
+ * different from its snapshot, and the diff would read that as an edit and
+ * re-push the entire ledger on the next flush.
+ */
+const canonicalizeDate = (t: Transaction): Transaction => {
+  const date = canonicalizeIso(t.date);
+  return date === t.date ? t : { ...t, date };
+};
+
 const readSlot = (key: string): { data: AppData | null; corrupted: boolean } => {
   try {
     const raw = typeof window !== "undefined" ? localStorage.getItem(key) : null;
@@ -60,7 +73,7 @@ const readSlot = (key: string): { data: AppData | null; corrupted: boolean } => 
     return {
       data: {
         schema_version:  SCHEMA_VERSION,
-        transactions:    parsed.transactions,
+        transactions:    (parsed.transactions as Transaction[]).map(canonicalizeDate),
         monthlyBalances: (parsed.monthlyBalances as Record<string, number>) ?? {},
       },
       corrupted: false,

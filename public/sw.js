@@ -2,9 +2,10 @@
 // Strategy: cache-first for app shell, network-first for navigation.
 // Keeps the budgeting tool functional with no connectivity.
 
-// Bumped to v5: pull-to-refresh was removed from the dashboard shell, so the
-// precached "/" from v4 has to be evicted or a returning device keeps the old one.
-const CACHE_NAME = "apsara-spend-v5";
+// Bumped to v6: the calendar-day fix changes how a transaction date is written.
+// A device still running the v5 shell would keep saving local-midnight dates and
+// storing them a day early, so the old shell has to be evicted.
+const CACHE_NAME = "apsara-spend-v6";
 
 // App shell: pages and static assets to precache on install
 const PRECACHE_URLS = [

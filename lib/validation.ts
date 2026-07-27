@@ -5,6 +5,7 @@ import {
   type CategoryId,
   type Transaction,
 } from "@/lib/types";
+import { dayFromIso, isoFromDay } from "@/lib/calendar-day";
 
 /**
  * Server-side validation. The client sanitises too, but a client is only a
@@ -88,8 +89,10 @@ export const parseTransactionInput = (
   } else if (typeof rawDate === "string") {
     const d = new Date(rawDate);
     if (Number.isNaN(d.getTime())) fail("date is not a valid date");
-    // Local components, matching lib/mappers.toSpentOn — see the note there.
-    spentOn = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+    // UTC components, matching lib/mappers.toSpentOn. Reading the request's
+    // instant in *server*-local time is what used to shift the day — the server
+    // has no business guessing which timezone the client was in.
+    spentOn = dayFromIso(rawDate);
   } else {
     fail("date is required");
     spentOn = "";
@@ -103,7 +106,7 @@ export const parseTransactionInput = (
       amountUSD: assertAmountUSD(b.amountUSD),
       category,
       note:      sanitizeNote(b.note) || category,
-      date:      new Date(`${spentOn}T00:00:00`).toISOString(),
+      date:      isoFromDay(spentOn),
     },
     spentOn,
   };

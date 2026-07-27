@@ -1,6 +1,7 @@
 import type { AppData, Transaction } from "@/lib/types";
 import { STORAGE_KEY } from "@/lib/constants";
 import { CATEGORY_IDS } from "@/lib/types";
+import { dayFromIso } from "@/lib/calendar-day";
 
 /**
  * Local backup / export.
@@ -94,11 +95,7 @@ const csvCell = (v: string | number): string => {
  * calendar day, matching what the app displays and what spent_on stores.
  */
 export const buildCsv = (ledger: AppData): string => {
-  const localDay = (iso: string) => {
-    const d = new Date(iso);
-    if (Number.isNaN(d.getTime())) return iso;
-    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-  };
+  const localDay = (iso: string) => dayFromIso(iso) || iso;
 
   const rows = [...ledger.transactions].sort((a, b) => (a.date < b.date ? 1 : -1));
 
