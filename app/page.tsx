@@ -1096,40 +1096,53 @@ function ReportSheet({
         style={{ background: "var(--color-bg-card)", padding: "24px 20px 48px", width: "100%", border: "1px solid var(--color-border)", maxWidth: 620, margin: "0 auto" }}
         onClick={(e) => e.stopPropagation()}>
 
-        {sheetMode === "sheet" && <div style={{ width: 36, height: 4, background: "var(--color-border-mid)", borderRadius: 2, margin: "0 auto 20px" }} />}
-
-        {/* ── Title row ── */}
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12, marginBottom: 18 }}>
-          <div style={{ minWidth: 0 }}>
-            <div style={{ fontSize: 22, fontWeight: 800, color: "var(--color-text-hi)", fontFamily: "var(--font-headline)", letterSpacing: "-0.02em", lineHeight: 1.15 }}>
-              My Report
+        {/* ── Title row — sticky, so the report always says what it is and the  */}
+        {/* close button stays reachable however far down the sheet is scrolled. */}
+        <div className="rep-sticky">
+          {sheetMode === "sheet" && <div style={{ width: 36, height: 4, background: "var(--color-border-mid)", borderRadius: 2, margin: "0 auto 16px" }} />}
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12 }}>
+            <div style={{ minWidth: 0 }}>
+              <div style={{ fontSize: 22, fontWeight: 800, color: "var(--color-text-hi)", fontFamily: "var(--font-headline)", letterSpacing: "-0.02em", lineHeight: 1.15 }}>
+                My Report
+              </div>
+              <div style={{ fontSize: 12, color: "var(--color-text-lo)", fontFamily: "var(--font-body)", marginTop: 4, lineHeight: 1.4 }}>
+                Your personal spending — {periodSubtitle}.
+              </div>
             </div>
-            <div style={{ fontSize: 12, color: "var(--color-text-lo)", fontFamily: "var(--font-body)", marginTop: 4, lineHeight: 1.4 }}>
-              Your personal spending — {periodSubtitle}.
-            </div>
+            <button aria-label="Close report" onClick={onClose}
+              style={{ background: "var(--color-bg-nav)", border: "none", borderRadius: 9, padding: 8, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+              <X size={16} color="var(--color-text-lo)" strokeWidth={2} />
+            </button>
           </div>
-          <button aria-label="Close report" onClick={onClose}
-            style={{ background: "var(--color-bg-nav)", border: "none", borderRadius: 9, padding: 8, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
-            <X size={16} color="var(--color-text-lo)" strokeWidth={2} />
-          </button>
         </div>
 
         {/* ── Period selector ── */}
-        <select
-          aria-label="Report period"
-          value={period}
-          onChange={(e) => onPeriodChange(e.target.value as ReportPeriod)}
-          className="rep-period"
-          style={{
-            background: "var(--color-bg-page)", border: "1px solid var(--color-border-mid)",
-            borderRadius: 10, padding: "9px 12px", cursor: "pointer",
-            color: "var(--color-text-mid)", fontSize: 13, fontWeight: 600,
-            fontFamily: "var(--font-body)", marginBottom: 16,
-          }}>
-          {(Object.keys(PERIOD_LABELS) as ReportPeriod[]).map((p) => (
-            <option key={p} value={p}>{PERIOD_LABELS[p]}</option>
-          ))}
-        </select>
+        {/* The chevron is a sibling icon, not the select's own indicator: the   */}
+        {/* platform arrow is suppressed by appearance:none, and drawing it back */}
+        {/* with lucide keeps it the same glyph and stroke as every other        */}
+        {/* chevron in the app. pointer-events:none so the click still opens the */}
+        {/* native picker.                                                       */}
+        <div className="rep-period-wrap">
+          <select
+            aria-label="Report period"
+            value={period}
+            onChange={(e) => onPeriodChange(e.target.value as ReportPeriod)}
+            className="rep-period"
+            style={{
+              background: "var(--color-bg-page)", border: "1px solid var(--color-border-mid)",
+              borderRadius: 10, padding: "9px 12px", cursor: "pointer",
+              color: "var(--color-text-mid)", fontSize: 13, fontWeight: 600,
+              fontFamily: "var(--font-body)",
+            }}>
+            {(Object.keys(PERIOD_LABELS) as ReportPeriod[]).map((p) => (
+              <option key={p} value={p}>{PERIOD_LABELS[p]}</option>
+            ))}
+          </select>
+          <ChevronDown
+            size={14} strokeWidth={2.5} color="var(--color-text-lo)"
+            aria-hidden="true"
+            style={{ position: "absolute", right: 11, top: "50%", marginTop: -7, pointerEvents: "none" }} />
+        </div>
 
         {count === 0 ? (
           <div style={{ background: "var(--color-bg-page)", border: "1px solid var(--color-border)", borderRadius: 14, padding: "40px 20px", textAlign: "center" }}>
@@ -2644,14 +2657,27 @@ export default function ApsaraSpendPage() {
         }
 
         /* ── My Report ────────────────────────────────────────────────────── */
+        /* Sticky title row. The sheet itself is the scroll container, so the   */
+        /* negative margins pull this back out to its padding edges — otherwise */
+        /* rows would scroll past in the 20px gutters either side of it.        */
+        .rep-sticky {
+          position: sticky; top: 0; z-index: 5;
+          margin: -24px -20px 18px;
+          padding: 24px 20px 14px;
+          background: var(--color-bg-card);
+          border-bottom: 0.5px solid color-mix(in srgb, var(--color-border) 70%, transparent);
+        }
+
         /* Native select, restyled: the platform picker is a better control on  */
         /* iOS than anything rebuilt in JS, and it is keyboard-accessible free. */
+        .rep-period-wrap {
+          position: relative;
+          display: inline-flex; align-items: center;
+          margin-bottom: 16px;
+        }
         .rep-period {
           -webkit-appearance: none; appearance: none;
-          padding-right: 30px !important;
-          background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%2394a3b8' stroke-width='3' stroke-linecap='round'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
-          background-repeat: no-repeat;
-          background-position: right 11px center;
+          padding-right: 32px !important;
         }
 
         /* Tiles: 2×2 on mobile, one row of 4 once there is width for it. */
