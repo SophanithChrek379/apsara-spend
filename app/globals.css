@@ -1,0 +1,138 @@
+/* ═══════════════════════════════════════════════════════════════════════════
+   Tailwind CSS v4 + shadcn/ui base layer.
+
+   This file is additive: the existing UI in app/page.tsx keeps its inline
+   styles and its own <style> block, and nothing here changes how it renders.
+   Two details make that co-existence work — read them before editing:
+
+   1. UTILITIES ARE IMPORTED UNLAYERED (no `layer(utilities)`).
+      page.tsx ships its reset in a plain, unlayered <style> tag, including
+      `*, *::before, *::after { margin: 0; padding: 0 }`. Unlayered rules beat
+      *any* cascade layer, so utilities imported the usual way would lose to
+      that `*` selector and `p-4`/`m-2` would silently do nothing. Imported
+      unlayered they compete on specificity instead, where `.p-4` (0,1,0)
+      wins over `*` (0,0,0).
+      → Once page.tsx's <style> block moves into this file, collapse the four
+        imports below back into the standard single `@import "tailwindcss";`.
+
+   2. SHADCN TOKENS ARE PREFIXED `--ui-*`.
+      page.tsx already owns `--accent` (the yellow/indigo/emerald/rose palette
+      switcher). shadcn's own `--accent` means "subtle hover surface", so
+      sharing the name would paint every hover state bright yellow. The `--ui-`
+      prefix keeps both namespaces intact; `@theme inline` maps them onto the
+      normal utility names, so components still use `bg-accent`, `bg-card`,
+      `text-muted-foreground`, … exactly as shadcn generates them.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+@layer theme, base, components;
+
+@import "tailwindcss/theme.css" layer(theme);
+@import "tailwindcss/preflight.css" layer(base);
+@import "tailwindcss/utilities.css";
+@import "tw-animate-css";
+
+/* Dark is the default here, and light is opt-in via <html data-theme="light">,
+   which is the scheme page.tsx already toggles — so `dark:` utilities follow
+   the app's existing theme switch with no extra wiring. */
+@custom-variant dark (&:where(html:not([data-theme="light"]) *));
+
+/* ── Token → utility mapping ───────────────────────────────────────────────
+   `inline` keeps these out of :root, so they can safely reference app vars
+   of the same name without recursion. */
+@theme inline {
+  --color-background:          var(--ui-background);
+  --color-foreground:          var(--ui-foreground);
+  --color-card:                var(--ui-card);
+  --color-card-foreground:     var(--ui-card-foreground);
+  --color-popover:             var(--ui-popover);
+  --color-popover-foreground:  var(--ui-popover-foreground);
+  --color-primary:             var(--ui-primary);
+  --color-primary-foreground:  var(--ui-primary-foreground);
+  --color-secondary:           var(--ui-secondary);
+  --color-secondary-foreground: var(--ui-secondary-foreground);
+  --color-muted:               var(--ui-muted);
+  --color-muted-foreground:    var(--ui-muted-foreground);
+  --color-accent:              var(--ui-accent);
+  --color-accent-foreground:   var(--ui-accent-foreground);
+  --color-destructive:         var(--ui-destructive);
+  --color-destructive-foreground: var(--ui-destructive-foreground);
+  --color-border:              var(--ui-border);
+  --color-input:               var(--ui-input);
+  --color-ring:                var(--ui-ring);
+
+  --color-chart-1: var(--ui-chart-1);
+  --color-chart-2: var(--ui-chart-2);
+  --color-chart-3: var(--ui-chart-3);
+  --color-chart-4: var(--ui-chart-4);
+  --color-chart-5: var(--ui-chart-5);
+
+  --radius-sm: calc(var(--ui-radius) - 4px);
+  --radius-md: calc(var(--ui-radius) - 2px);
+  --radius-lg: var(--ui-radius);
+  --radius-xl: calc(var(--ui-radius) + 4px);
+
+  /* Matches the body font page.tsx loads from Google Fonts. */
+  --font-sans: var(--font-body, "Open Sans", system-ui, sans-serif);
+}
+
+/* ── Dark theme (default) ──────────────────────────────────────────────────
+   Values track the app's own vars so shadcn components inherit the palette —
+   including the accent switcher — automatically. The literal fallbacks are
+   the current dark-theme values, so this file still stands on its own if it
+   is ever used outside page.tsx. */
+:root {
+  --ui-radius: 0.75rem; /* 12px — matches the app's card/input radius */
+
+  --ui-background:           var(--color-bg-page, #080b10);
+  --ui-foreground:           var(--color-text-hi, #f8fafc);
+  --ui-card:                 var(--color-bg-card, #0f131a);
+  --ui-card-foreground:      var(--color-text-hi, #f8fafc);
+  --ui-popover:              var(--color-bg-nav, #141920);
+  --ui-popover-foreground:   var(--color-text-hi, #f8fafc);
+  --ui-primary:              var(--accent, #fbbf24);
+  --ui-primary-foreground:   var(--accent-text, #0d0f14);
+  --ui-secondary:            var(--color-bg-nav, #141920);
+  --ui-secondary-foreground: var(--color-text-mid, #cbd5e1);
+  --ui-muted:                var(--color-bg-input, #141920);
+  --ui-muted-foreground:     var(--color-text-lo, #94a3b8);
+  --ui-accent:               var(--color-bg-input, #141920);
+  --ui-accent-foreground:    var(--color-text-hi, #f8fafc);
+  --ui-destructive:          #ef4444;
+  --ui-destructive-foreground: #ffffff;
+  --ui-border:               var(--color-border, #1a2333);
+  --ui-input:                var(--color-border-mid, #1e2a38);
+  --ui-ring:                 var(--accent, #fbbf24);
+
+  /* Category colours from page.tsx, in the order they appear there. */
+  --ui-chart-1: #fb923c;
+  --ui-chart-2: #38bdf8;
+  --ui-chart-3: #c084fc;
+  --ui-chart-4: #34d399;
+  --ui-chart-5: #f472b6;
+}
+
+/* ── Light theme ───────────────────────────────────────────────────────────
+   Same var references; only the standalone fallbacks change. */
+html[data-theme="light"] {
+  --ui-background:           var(--color-bg-page, #f8fafc);
+  --ui-foreground:           var(--color-text-hi, #0f172a);
+  --ui-card:                 var(--color-bg-card, #ffffff);
+  --ui-card-foreground:      var(--color-text-hi, #0f172a);
+  --ui-popover:              var(--color-bg-nav, #f1f5f9);
+  --ui-popover-foreground:   var(--color-text-hi, #0f172a);
+  --ui-secondary:            var(--color-bg-nav, #f1f5f9);
+  --ui-secondary-foreground: var(--color-text-mid, #334155);
+  --ui-muted:                var(--color-bg-input, #ffffff);
+  --ui-muted-foreground:     var(--color-text-lo, #475569);
+  --ui-accent:               var(--color-bg-deep, #e2e8f0);
+  --ui-accent-foreground:    var(--color-text-hi, #0f172a);
+  --ui-border:               var(--color-border, #e2e8f0);
+  --ui-input:                var(--color-border-mid, #cbd5e1);
+}
+
+@layer base {
+  * {
+    border-color: var(--ui-border);
+    outline-color: color-mix(in oklab, var(--ui-ring) 50%, transparent);
+  }
+}
