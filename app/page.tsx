@@ -3132,7 +3132,7 @@ export default function ApsaraSpendPage() {
                 )}
 
                 {/* ── Group 4: Backup — always available, covers every month ── */}
-                <div style={{ background: "var(--color-bg-page)", borderRadius: 14, overflow: "hidden" }}>
+                <div style={{ background: "var(--color-bg-page)", borderRadius: 14, overflow: "hidden", marginBottom: 12 }}>
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "13px 16px", gap: 12 }}>
                     <div style={{ minWidth: 0 }}>
                       <div style={{ fontSize: 13, fontWeight: 500, color: "var(--color-text-mid)", fontFamily: "var(--font-body)", marginBottom: 2 }}>
