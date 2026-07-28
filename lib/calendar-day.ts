@@ -51,6 +51,18 @@ export const dayFromIso = (iso: string): string => {
 /** Month key ("YYYY-MM") for a stored transaction date. */
 export const monthKeyFromIso = (iso: string): string => dayFromIso(iso).slice(0, 7);
 
+/**
+ * Human-readable day label: "2026-04-09" → "09 Apr 2026".
+ *
+ * Reads the day at local noon so no DST or timezone edge case can shift the
+ * Date object onto the neighbouring calendar day.
+ */
+export const formatDisplayDate = (day: string): string => {
+  if (!day) return "Select date";
+  const d = new Date(`${day}T12:00:00`);
+  return d.toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" });
+};
+
 /** Today as the user's device reckons it — the right default for a date picker. */
 export const todayDay = (d = new Date()): string =>
   `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
