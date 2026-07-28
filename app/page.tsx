@@ -22,6 +22,15 @@ import { CATEGORIES } from "@/lib/categories";
 import { ReportSheet } from "@/components/report/ReportSheet";
 import { AccountSheet, type AuthMode } from "@/components/account/AccountSheet";
 import { signOut as signOutAccount } from "@/lib/ledger/account";
+import { Button } from "@/components/ui/button";
+import {
+  Sheet,
+  SheetClose,
+  SheetContent,
+  SheetDescription,
+  SheetTitle,
+} from "@/components/ui/sheet";
+import { cn } from "@/lib/utils";
 
 interface Toast {
   msg: string;
@@ -1060,13 +1069,12 @@ export default function ApsaraSpendPage() {
   // A2 — focus trap refs
   const budgetModalRef   = useRef<HTMLDivElement>(null);
   const budgetInputRef   = useRef<HTMLInputElement>(null);
-  const settingsModalRef = useRef<HTMLDivElement>(null);
 
-  // A2 — activate focus trap whenever these modals are open. The report is not
-  // in this list: it is a Radix sheet, which traps focus itself.
+  // A2 — activate focus trap whenever these modals are open. Settings and the
+  // report are not in this list: both are Radix sheets, which trap focus
+  // themselves. Running this trap over one too would put two systems in a
+  // fight over document.activeElement on every Tab.
   useFocusTrap(budgetModalRef,   showBudgetModal);
-
-  useFocusTrap(settingsModalRef, showSettings);
   // Q3 — theme mode: system (default) | dark | light
   const [themeMode,        setThemeMode]        = useState<"dark"|"light"|"system">("system");
   // Q4 — colour palette: yellow (default) | indigo | emerald | rose
@@ -1226,8 +1234,12 @@ export default function ApsaraSpendPage() {
   // R1 / S2 — Body scroll lock: prevent background scroll while any modal is open,
   // and also while the non-scrolling init screen is active (spec §1 & §5).
   // Note: use inline balance check to avoid hoisting conflict with isBalanceLocked.
+  // Settings and the report are absent from `anyOpen` on purpose: Radix sheets
+  // lock the scroll themselves, and also compensate for the scrollbar width.
+  // Setting overflow:hidden here as well would undo that compensation and shift
+  // the page under them.
   useEffect(() => {
-    const anyOpen = showModal || showSettings || showPicker || showBudgetModal || showReport;
+    const anyOpen = showModal || showPicker || showBudgetModal;
     const nobudget = !(selectedMonth in data.monthlyBalances && data.monthlyBalances[selectedMonth] > 0);
     // Recomputed here rather than reusing monthTxs, which is declared below —
     // the dependency array is evaluated during render, so referencing it would
@@ -1236,7 +1248,7 @@ export default function ApsaraSpendPage() {
     const initActive = isLoaded && nobudget && !monthHasTxs;
     document.body.style.overflow = (anyOpen || initActive) ? "hidden" : "";
     return () => { document.body.style.overflow = ""; };
-  }, [showModal, showSettings, showPicker, showBudgetModal, showReport, isLoaded, selectedMonth, data.monthlyBalances, data.transactions]);
+  }, [showModal, showPicker, showBudgetModal, isLoaded, selectedMonth, data.monthlyBalances, data.transactions]);
 
   // ── Derived ──────────────────────────────────────────────────────────────────
   // E2: useMemo — these are the most expensive derivations in the component.
@@ -2960,240 +2972,6 @@ export default function ApsaraSpendPage() {
             </motion.div>
           )}
 
-          {/* ── Settings sheet ── */}
-          {showSettings && (
-            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-              className="modal-backdrop"
-              style={{ position: "fixed", inset: 0, background: "rgba(5,7,12,0.88)", zIndex: 200, display: "flex" }}
-              onClick={() => { setShowSettings(false); setResetConfirm(false); setSignOutConfirm(false); }}>
-              <motion.div ref={settingsModalRef}
-                initial={pageModalMode === "center" ? MODAL_ENTER_CENTER : MODAL_ENTER_SHEET}
-                animate={pageModalMode === "center" ? MODAL_ANIM_CENTER  : MODAL_ANIM_SHEET}
-                exit={pageModalMode   === "center" ? MODAL_EXIT_CENTER   : MODAL_EXIT_SHEET}
-                transition={{ type: "spring", damping: 28, stiffness: 280 }}
-                className="modal-sheet"
-                role="dialog" aria-modal="true" aria-label="Settings"
-                style={{ background: "var(--color-bg-card)", padding: "24px 20px 48px", width: "100%", border: "1px solid var(--color-border)", maxWidth: 480, margin: "0 auto" }}
-                onClick={(e) => e.stopPropagation()}>
-
-                {/* Drag handle */}
-                {pageModalMode === "sheet" && <div style={{ width: 36, height: 4, background: "var(--color-border-mid)", borderRadius: 2, margin: "0 auto 20px" }} />}
-
-                {/* Header */}
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
-                  <span style={{ fontSize: 18, fontWeight: 700, color: "var(--color-text-hi)", fontFamily: "var(--font-headline)", letterSpacing: "-0.01em" }}>Settings</span>
-                  <button aria-label="Close settings"
-                    onClick={() => { setShowSettings(false); setResetConfirm(false); setSignOutConfirm(false); }}
-                    style={{ background: "var(--color-bg-nav)", border: "none", borderRadius: 9, padding: 8, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}>
-                    <X size={16} color="var(--color-text-lo)" strokeWidth={2} />
-                  </button>
-                </div>
-
-                {/* ── Group 0: Account ──
-                    New region, so it follows the shadcn + utilities rule rather
-                    than the inline styles the groups below are grandfathered
-                    into. `bg-background` resolves to the same --color-bg-page
-                    those groups set by hand. */}
-                <div className="mb-3 rounded-[14px] bg-background px-4 py-[13px]">
-                  {account && !account.isAnonymous ? (
-                    <div className="flex items-center justify-between gap-3">
-                      <div className="min-w-0">
-                        <div className="truncate text-[13px] font-medium text-secondary-foreground">
-                          {account.email}
-                        </div>
-                        <div className="mt-0.5 flex items-center gap-1 text-[11px] text-muted-foreground">
-                          <Check size={11} strokeWidth={2.5} className="text-emerald-500" />
-                          Backed up — reachable from any device
-                        </div>
-                      </div>
-                      {!signOutConfirm ? (
-                        <button
-                          onClick={() => setSignOutConfirm(true)}
-                          className="shrink-0 cursor-pointer rounded-lg border border-border bg-secondary px-3 py-1.5 text-xs font-semibold whitespace-nowrap text-secondary-foreground">
-                          Sign out
-                        </button>
-                      ) : (
-                        <button
-                          onClick={() => void handleSignOut()}
-                          className="shrink-0 cursor-pointer rounded-lg border border-destructive/40 bg-destructive/10 px-3 py-1.5 text-xs font-semibold whitespace-nowrap text-destructive">
-                          Confirm
-                        </button>
-                      )}
-                    </div>
-                  ) : (
-                    <div className="flex items-center justify-between gap-3">
-                      <div className="min-w-0">
-                        <div className="text-[13px] font-medium text-secondary-foreground">
-                          {account?.pendingEmail ? "Finish backing up" : "Back up your data"}
-                        </div>
-                        <div className="mt-0.5 truncate text-[11px] text-muted-foreground/70">
-                          {account?.pendingEmail
-                            ? `Verify ${account.pendingEmail}`
-                            : data.transactions.length > 0
-                              ? `${data.transactions.length} ${data.transactions.length === 1 ? "entry" : "entries"} on this device only`
-                              : "This device only"}
-                        </div>
-                      </div>
-                      <div className="flex shrink-0 gap-1.5">
-                        <button
-                          onClick={() => { setAccountMode("signup"); setShowAccount(true); }}
-                          className="cursor-pointer rounded-lg border border-primary/40 bg-primary/12 px-3 py-1.5 text-xs font-semibold whitespace-nowrap text-primary">
-                          Back up
-                        </button>
-                        <button
-                          onClick={() => { setAccountMode("login"); setShowAccount(true); }}
-                          className="cursor-pointer rounded-lg border border-border bg-secondary px-3 py-1.5 text-xs font-semibold whitespace-nowrap text-secondary-foreground">
-                          Log in
-                        </button>
-                      </div>
-                    </div>
-                  )}
-                </div>
-
-                {/* ── Group 1: Appearance ── */}
-                <div style={{ background: "var(--color-bg-page)", borderRadius: 14, overflow: "hidden", marginBottom: 12 }}>
-
-                  {/* Theme row */}
-                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "13px 16px", borderBottom: "0.5px solid var(--color-border)" }}>
-                    <span style={{ fontSize: 13, fontWeight: 500, color: "var(--color-text-mid)", fontFamily: "var(--font-body)" }}>Theme</span>
-                    <div role="radiogroup" aria-label="Theme mode" style={{ display: "flex", background: "var(--color-bg-nav)", borderRadius: 8, padding: 2, gap: 2 }}>
-                      {(["system", "dark", "light"] as const).map((m) => (
-                        <button key={m} role="radio" aria-checked={themeMode === m} onClick={() => setThemeMode(m)}
-                          style={{ padding: "5px 10px", borderRadius: 6, border: "none", cursor: "pointer", background: themeMode === m ? "var(--accent)" : "transparent", color: themeMode === m ? "var(--accent-text)" : "var(--color-text-lo)", fontSize: 11, fontWeight: 600, fontFamily: "var(--font-body)", textTransform: "capitalize", transition: "all 0.15s" }}>
-                          {m}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-
-                  {/* Accent row */}
-                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "13px 16px", borderBottom: "0.5px solid var(--color-border)" }}>
-                    <span style={{ fontSize: 13, fontWeight: 500, color: "var(--color-text-mid)", fontFamily: "var(--font-body)" }}>Accent</span>
-                    <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                      {([
-                        { id: "yellow",  hex: "#fbbf24" },
-                        { id: "indigo",  hex: "#818cf8" },
-                        { id: "emerald", hex: "#34d399" },
-                        { id: "rose",    hex: "#fb7185" },
-                      ] as const).map(({ id, hex }) => (
-                        <button key={id} aria-label={`${id} palette`} onClick={() => setPalette(id)}
-                          style={{ width: 22, height: 22, borderRadius: "50%", background: hex, border: "none", cursor: "pointer", boxShadow: palette === id ? `0 0 0 2px var(--color-bg-card), 0 0 0 3.5px ${hex}` : "none", transition: "box-shadow 0.15s" }} />
-                      ))}
-                    </div>
-                  </div>
-
-                  {/* Budget Mode row */}
-                  <div style={{ padding: "13px 16px" }}>
-                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: constraintMode ? 6 : 0 }}>
-                      <span style={{ fontSize: 13, fontWeight: 500, color: "var(--color-text-mid)", fontFamily: "var(--font-body)" }}>Budget mode</span>
-                      <div role="radiogroup" aria-label="Budget mode" style={{ display: "flex", background: "var(--color-bg-nav)", borderRadius: 8, padding: 2, gap: 2 }}>
-                        {(["soft", "hard"] as const).map((m) => (
-                          <button key={m} role="radio" aria-checked={constraintMode === m} onClick={() => setConstraintMode(m)}
-                            style={{ padding: "5px 12px", borderRadius: 6, border: "none", cursor: "pointer", background: constraintMode === m ? "var(--accent)" : "transparent", color: constraintMode === m ? "var(--accent-text)" : "var(--color-text-lo)", fontSize: 11, fontWeight: 600, fontFamily: "var(--font-body)", textTransform: "capitalize", transition: "all 0.15s" }}>
-                            {m}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                    <div style={{ fontSize: 11, color: "var(--color-text-lo)", fontFamily: "var(--font-body)", lineHeight: 1.5 }}>
-                      {constraintMode === "soft" ? "Allows over-budget entries with a warning." : "Requires confirmation before exceeding your budget."}
-                    </div>
-                  </div>
-                </div>
-
-                {/* ── Group 2: Notifications ── */}
-                {notifPermission !== "unsupported" && (
-                  <div style={{ background: "var(--color-bg-page)", borderRadius: 14, overflow: "hidden", marginBottom: 12 }}>
-                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "13px 16px" }}>
-                      <div>
-                        <div style={{ fontSize: 13, fontWeight: 500, color: "var(--color-text-mid)", fontFamily: "var(--font-body)", marginBottom: 2 }}>Budget alerts</div>
-                        <div style={{ fontSize: 11, color: "var(--color-text-lo)", fontFamily: "var(--font-body)" }}>
-                          {notifPermission === "granted" && <><Check size={11} color="#34d399" strokeWidth={2.5} style={{ display: "inline", verticalAlign: "middle", marginRight: 3 }} />At 80% and 95% of budget</>}
-                          {notifPermission === "denied"  && "Blocked — enable in browser settings"}
-                          {notifPermission === "default" && "Get notified when nearing your limit"}
-                        </div>
-                      </div>
-                      {notifPermission === "default" && (
-                        <button onClick={requestNotifPermission}
-                          style={{ background: "var(--accent-muted)", border: "1px solid var(--accent-border)", color: "var(--accent)", borderRadius: 8, padding: "6px 12px", fontSize: 11, fontWeight: 600, fontFamily: "var(--font-body)", cursor: "pointer", whiteSpace: "nowrap" }}>
-                          Enable
-                        </button>
-                      )}
-                      {notifPermission === "granted" && (
-                        <span style={{ fontSize: 11, background: "#34d39920", color: "#34d399", border: "1px solid #34d39940", padding: "3px 9px", borderRadius: 99, fontFamily: "var(--font-body)", fontWeight: 500 }}>Active</span>
-                      )}
-                      {notifPermission === "denied" && (
-                        <span style={{ fontSize: 11, background: "#ef444418", color: "#ef4444", border: "1px solid #ef444440", padding: "3px 9px", borderRadius: 99, fontFamily: "var(--font-body)", fontWeight: 500 }}>Blocked</span>
-                      )}
-                    </div>
-                  </div>
-                )}
-
-                {/* ── Group 4: Backup — always available, covers every month ── */}
-                <div style={{ background: "var(--color-bg-page)", borderRadius: 14, overflow: "hidden", marginBottom: 12 }}>
-                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "13px 16px", gap: 12 }}>
-                    <div style={{ minWidth: 0 }}>
-                      <div style={{ fontSize: 13, fontWeight: 500, color: "var(--color-text-mid)", fontFamily: "var(--font-body)", marginBottom: 2 }}>
-                        Export data
-                      </div>
-                      <div style={{ fontSize: 11, color: "var(--color-text-lo)", fontFamily: "var(--font-body)", opacity: 0.7 }}>
-                        {data.transactions.length > 0
-                          ? `${data.transactions.length} ${data.transactions.length === 1 ? "entry" : "entries"} across all months`
-                          : "No entries yet"}
-                      </div>
-                    </div>
-                    <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>
-                      <button onClick={() => handleExport("json")}
-                        aria-label="Download full backup as JSON"
-                        style={{ display: "flex", alignItems: "center", gap: 5, background: "var(--accent-muted)", border: "1px solid var(--accent-border)", color: "var(--accent)", borderRadius: 8, padding: "6px 11px", cursor: "pointer", fontSize: 12, fontWeight: 600, fontFamily: "var(--font-body)", whiteSpace: "nowrap" }}>
-                        <Download size={13} strokeWidth={2.2} />
-                        JSON
-                      </button>
-                      <button onClick={() => handleExport("csv")}
-                        aria-label="Download entries as CSV"
-                        style={{ display: "flex", alignItems: "center", gap: 5, background: "var(--color-bg-nav)", border: "1px solid var(--color-border)", color: "var(--color-text-mid)", borderRadius: 8, padding: "6px 11px", cursor: "pointer", fontSize: 12, fontWeight: 600, fontFamily: "var(--font-body)", whiteSpace: "nowrap" }}>
-                        <FileText size={13} strokeWidth={2.2} />
-                        CSV
-                      </button>
-                    </div>
-                  </div>
-                </div>
-
-                {/* ── Group 5: Data — shown when month has a budget or entries ── */}
-                {(monthTxs.length > 0 || monthBalance > 0) && (
-                  <div style={{ background: "var(--color-bg-page)", borderRadius: 14, overflow: "hidden" }}>
-                    {!resetConfirm ? (
-                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "13px 16px" }}>
-                        <div>
-                          <div style={{ fontSize: 13, fontWeight: 500, color: "var(--color-text-lo)", fontFamily: "var(--font-body)", marginBottom: 2 }}>
-                            Reset {MONTH_FULL[month - 1]}
-                          </div>
-                          <div style={{ fontSize: 11, color: "var(--color-text-lo)", fontFamily: "var(--font-body)", opacity: 0.7 }}>
-                            Clears {monthTxs.length > 0 ? `${monthTxs.length} ${monthTxs.length === 1 ? "entry" : "entries"} and ` : ""}the budget
-                          </div>
-                        </div>
-                        <button onClick={() => setResetConfirm(true)}
-                          style={{ background: "#ef444418", border: "1px solid #ef444440", color: "#ef4444", borderRadius: 8, padding: "6px 12px", cursor: "pointer", fontSize: 12, fontWeight: 600, fontFamily: "var(--font-body)", whiteSpace: "nowrap" }}>
-                          Reset
-                        </button>
-                      </div>
-                    ) : (
-                      <div style={{ padding: "14px 16px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                        <div style={{ fontSize: 12, color: "var(--color-text-lo)", fontFamily: "var(--font-body)", lineHeight: 1.5, flex: 1, paddingRight: 12 }}>
-                          Removes all {MONTH_FULL[month - 1]} entries and resets the budget. Cannot be undone.
-                        </div>
-                        <button onClick={handleResetMonth}
-                          style={{ background: "#ef4444", border: "none", color: "#fff", borderRadius: 8, padding: "7px 14px", cursor: "pointer", fontSize: 12, fontWeight: 700, fontFamily: "var(--font-body)", whiteSpace: "nowrap", flexShrink: 0 }}>
-                          Confirm
-                        </button>
-                      </div>
-                    )}
-                  </div>
-                )}
-
-              </motion.div>
-            </motion.div>
-          )}
         </AnimatePresence>
 
         {/* ── My Report ──
@@ -3222,6 +3000,263 @@ export default function ApsaraSpendPage() {
           entryCount={data.transactions.length}
           onAuthenticated={handleAuthenticated}
         />
+
+        {/* ── Settings ──
+            A Radix sheet, like the report and the account sheet. It used to be a
+            hand-rolled backdrop + motion.div pinned at `zIndex: 200`, which put
+            it *above* the account sheet Radix portals at z-50 — so "Back up"
+            opened a sheet that painted behind this panel and could not be
+            reached. Sharing one layer system is what makes that class of bug
+            impossible, and it hands Radix the focus trap, the Escape key, the
+            scroll lock and `aria-modal` for free.
+
+            Responsive shape is the same as the old `.modal-sheet` media query:
+            edge-anchored sheet on mobile, centred dialog from 768px up. The
+            centring is `inset-y-0 + my-auto + h-fit` rather than a translate,
+            deliberately — Radix animates `transform`, so positioning with one
+            here would be overwritten mid-transition. */}
+        <Sheet
+          open={showSettings}
+          onOpenChange={(next) => {
+            setShowSettings(next);
+            if (!next) { setResetConfirm(false); setSignOutConfirm(false); }
+          }}>
+          <SheetContent
+            side="bottom"
+            showCloseButton={false}
+            aria-label="Settings"
+            className={cn(
+              "mx-auto max-h-[92dvh] w-full max-w-[480px] gap-0 overflow-y-auto",
+              "rounded-t-[24px] border-border bg-card px-5 pt-6 pb-12 font-sans",
+              "md:inset-y-0 md:my-auto md:h-fit md:max-h-[88dvh] md:rounded-[20px] md:border",
+              // A 1rem rise reads better than a full-height slide once the panel
+              // is centred rather than stuck to the bottom edge.
+              "md:data-[state=open]:slide-in-from-bottom-4 md:data-[state=closed]:slide-out-to-bottom-4",
+            )}>
+
+            {/* Drag handle — the sheet affordance, so mobile only. */}
+            <div className="mx-auto mb-5 h-1 w-9 shrink-0 rounded-full bg-input md:hidden" />
+
+            <div className="mb-5 flex items-center justify-between">
+              <SheetTitle className="font-display text-[18px] leading-none font-bold tracking-[-0.01em] text-card-foreground">
+                Settings
+              </SheetTitle>
+              <SheetClose asChild>
+                <Button
+                  variant="secondary" size="icon-sm" aria-label="Close settings"
+                  className="shrink-0 rounded-[9px] text-muted-foreground">
+                  <X size={16} strokeWidth={2} />
+                </Button>
+              </SheetClose>
+            </div>
+
+            <SheetDescription className="sr-only">
+              Account, appearance, notifications, export and reset options.
+            </SheetDescription>
+
+            {/* ── Group 0: Account ──
+                New region, so it follows the shadcn + utilities rule rather
+                than the inline styles the groups below are grandfathered
+                into. `bg-background` resolves to the same --color-bg-page
+                those groups set by hand. */}
+            <div className="mb-3 rounded-[14px] bg-background px-4 py-[13px]">
+              {account && !account.isAnonymous ? (
+                <div className="flex items-center justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="truncate text-[13px] font-medium text-secondary-foreground">
+                      {account.email}
+                    </div>
+                    <div className="mt-0.5 flex items-center gap-1 text-[11px] text-muted-foreground">
+                      <Check size={11} strokeWidth={2.5} className="text-emerald-500" />
+                      Backed up — reachable from any device
+                    </div>
+                  </div>
+                  {!signOutConfirm ? (
+                    <button
+                      onClick={() => setSignOutConfirm(true)}
+                      className="shrink-0 cursor-pointer rounded-lg border border-border bg-secondary px-3 py-1.5 text-xs font-semibold whitespace-nowrap text-secondary-foreground">
+                      Sign out
+                    </button>
+                  ) : (
+                    <button
+                      onClick={() => void handleSignOut()}
+                      className="shrink-0 cursor-pointer rounded-lg border border-destructive/40 bg-destructive/10 px-3 py-1.5 text-xs font-semibold whitespace-nowrap text-destructive">
+                      Confirm
+                    </button>
+                  )}
+                </div>
+              ) : (
+                <div className="flex items-center justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="text-[13px] font-medium text-secondary-foreground">
+                      {account?.pendingEmail ? "Finish backing up" : "Back up your data"}
+                    </div>
+                    <div className="mt-0.5 truncate text-[11px] text-muted-foreground/70">
+                      {account?.pendingEmail
+                        ? `Verify ${account.pendingEmail}`
+                        : data.transactions.length > 0
+                          ? `${data.transactions.length} ${data.transactions.length === 1 ? "entry" : "entries"} on this device only`
+                          : "This device only"}
+                    </div>
+                  </div>
+                  <div className="flex shrink-0 gap-1.5">
+                    <button
+                      onClick={() => { setAccountMode("signup"); setShowAccount(true); }}
+                      className="cursor-pointer rounded-lg border border-primary/40 bg-primary/12 px-3 py-1.5 text-xs font-semibold whitespace-nowrap text-primary">
+                      Back up
+                    </button>
+                    <button
+                      onClick={() => { setAccountMode("login"); setShowAccount(true); }}
+                      className="cursor-pointer rounded-lg border border-border bg-secondary px-3 py-1.5 text-xs font-semibold whitespace-nowrap text-secondary-foreground">
+                      Log in
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* ── Group 1: Appearance ── */}
+            <div style={{ background: "var(--color-bg-page)", borderRadius: 14, overflow: "hidden", marginBottom: 12 }}>
+
+              {/* Theme row */}
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "13px 16px", borderBottom: "0.5px solid var(--color-border)" }}>
+                <span style={{ fontSize: 13, fontWeight: 500, color: "var(--color-text-mid)", fontFamily: "var(--font-body)" }}>Theme</span>
+                <div role="radiogroup" aria-label="Theme mode" style={{ display: "flex", background: "var(--color-bg-nav)", borderRadius: 8, padding: 2, gap: 2 }}>
+                  {(["system", "dark", "light"] as const).map((m) => (
+                    <button key={m} role="radio" aria-checked={themeMode === m} onClick={() => setThemeMode(m)}
+                      style={{ padding: "5px 10px", borderRadius: 6, border: "none", cursor: "pointer", background: themeMode === m ? "var(--accent)" : "transparent", color: themeMode === m ? "var(--accent-text)" : "var(--color-text-lo)", fontSize: 11, fontWeight: 600, fontFamily: "var(--font-body)", textTransform: "capitalize", transition: "all 0.15s" }}>
+                      {m}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Accent row */}
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "13px 16px", borderBottom: "0.5px solid var(--color-border)" }}>
+                <span style={{ fontSize: 13, fontWeight: 500, color: "var(--color-text-mid)", fontFamily: "var(--font-body)" }}>Accent</span>
+                <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                  {([
+                    { id: "yellow",  hex: "#fbbf24" },
+                    { id: "indigo",  hex: "#818cf8" },
+                    { id: "emerald", hex: "#34d399" },
+                    { id: "rose",    hex: "#fb7185" },
+                  ] as const).map(({ id, hex }) => (
+                    <button key={id} aria-label={`${id} palette`} onClick={() => setPalette(id)}
+                      style={{ width: 22, height: 22, borderRadius: "50%", background: hex, border: "none", cursor: "pointer", boxShadow: palette === id ? `0 0 0 2px var(--color-bg-card), 0 0 0 3.5px ${hex}` : "none", transition: "box-shadow 0.15s" }} />
+                  ))}
+                </div>
+              </div>
+
+              {/* Budget Mode row */}
+              <div style={{ padding: "13px 16px" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: constraintMode ? 6 : 0 }}>
+                  <span style={{ fontSize: 13, fontWeight: 500, color: "var(--color-text-mid)", fontFamily: "var(--font-body)" }}>Budget mode</span>
+                  <div role="radiogroup" aria-label="Budget mode" style={{ display: "flex", background: "var(--color-bg-nav)", borderRadius: 8, padding: 2, gap: 2 }}>
+                    {(["soft", "hard"] as const).map((m) => (
+                      <button key={m} role="radio" aria-checked={constraintMode === m} onClick={() => setConstraintMode(m)}
+                        style={{ padding: "5px 12px", borderRadius: 6, border: "none", cursor: "pointer", background: constraintMode === m ? "var(--accent)" : "transparent", color: constraintMode === m ? "var(--accent-text)" : "var(--color-text-lo)", fontSize: 11, fontWeight: 600, fontFamily: "var(--font-body)", textTransform: "capitalize", transition: "all 0.15s" }}>
+                        {m}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <div style={{ fontSize: 11, color: "var(--color-text-lo)", fontFamily: "var(--font-body)", lineHeight: 1.5 }}>
+                  {constraintMode === "soft" ? "Allows over-budget entries with a warning." : "Requires confirmation before exceeding your budget."}
+                </div>
+              </div>
+            </div>
+
+            {/* ── Group 2: Notifications ── */}
+            {notifPermission !== "unsupported" && (
+              <div style={{ background: "var(--color-bg-page)", borderRadius: 14, overflow: "hidden", marginBottom: 12 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "13px 16px" }}>
+                  <div>
+                    <div style={{ fontSize: 13, fontWeight: 500, color: "var(--color-text-mid)", fontFamily: "var(--font-body)", marginBottom: 2 }}>Budget alerts</div>
+                    <div style={{ fontSize: 11, color: "var(--color-text-lo)", fontFamily: "var(--font-body)" }}>
+                      {notifPermission === "granted" && <><Check size={11} color="#34d399" strokeWidth={2.5} style={{ display: "inline", verticalAlign: "middle", marginRight: 3 }} />At 80% and 95% of budget</>}
+                      {notifPermission === "denied"  && "Blocked — enable in browser settings"}
+                      {notifPermission === "default" && "Get notified when nearing your limit"}
+                    </div>
+                  </div>
+                  {notifPermission === "default" && (
+                    <button onClick={requestNotifPermission}
+                      style={{ background: "var(--accent-muted)", border: "1px solid var(--accent-border)", color: "var(--accent)", borderRadius: 8, padding: "6px 12px", fontSize: 11, fontWeight: 600, fontFamily: "var(--font-body)", cursor: "pointer", whiteSpace: "nowrap" }}>
+                      Enable
+                    </button>
+                  )}
+                  {notifPermission === "granted" && (
+                    <span style={{ fontSize: 11, background: "#34d39920", color: "#34d399", border: "1px solid #34d39940", padding: "3px 9px", borderRadius: 99, fontFamily: "var(--font-body)", fontWeight: 500 }}>Active</span>
+                  )}
+                  {notifPermission === "denied" && (
+                    <span style={{ fontSize: 11, background: "#ef444418", color: "#ef4444", border: "1px solid #ef444440", padding: "3px 9px", borderRadius: 99, fontFamily: "var(--font-body)", fontWeight: 500 }}>Blocked</span>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* ── Group 4: Backup — always available, covers every month ── */}
+            <div style={{ background: "var(--color-bg-page)", borderRadius: 14, overflow: "hidden", marginBottom: 12 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "13px 16px", gap: 12 }}>
+                <div style={{ minWidth: 0 }}>
+                  <div style={{ fontSize: 13, fontWeight: 500, color: "var(--color-text-mid)", fontFamily: "var(--font-body)", marginBottom: 2 }}>
+                    Export data
+                  </div>
+                  <div style={{ fontSize: 11, color: "var(--color-text-lo)", fontFamily: "var(--font-body)", opacity: 0.7 }}>
+                    {data.transactions.length > 0
+                      ? `${data.transactions.length} ${data.transactions.length === 1 ? "entry" : "entries"} across all months`
+                      : "No entries yet"}
+                  </div>
+                </div>
+                <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>
+                  <button onClick={() => handleExport("json")}
+                    aria-label="Download full backup as JSON"
+                    style={{ display: "flex", alignItems: "center", gap: 5, background: "var(--accent-muted)", border: "1px solid var(--accent-border)", color: "var(--accent)", borderRadius: 8, padding: "6px 11px", cursor: "pointer", fontSize: 12, fontWeight: 600, fontFamily: "var(--font-body)", whiteSpace: "nowrap" }}>
+                    <Download size={13} strokeWidth={2.2} />
+                    JSON
+                  </button>
+                  <button onClick={() => handleExport("csv")}
+                    aria-label="Download entries as CSV"
+                    style={{ display: "flex", alignItems: "center", gap: 5, background: "var(--color-bg-nav)", border: "1px solid var(--color-border)", color: "var(--color-text-mid)", borderRadius: 8, padding: "6px 11px", cursor: "pointer", fontSize: 12, fontWeight: 600, fontFamily: "var(--font-body)", whiteSpace: "nowrap" }}>
+                    <FileText size={13} strokeWidth={2.2} />
+                    CSV
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            {/* ── Group 5: Data — shown when month has a budget or entries ── */}
+            {(monthTxs.length > 0 || monthBalance > 0) && (
+              <div style={{ background: "var(--color-bg-page)", borderRadius: 14, overflow: "hidden" }}>
+                {!resetConfirm ? (
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "13px 16px" }}>
+                    <div>
+                      <div style={{ fontSize: 13, fontWeight: 500, color: "var(--color-text-lo)", fontFamily: "var(--font-body)", marginBottom: 2 }}>
+                        Reset {MONTH_FULL[month - 1]}
+                      </div>
+                      <div style={{ fontSize: 11, color: "var(--color-text-lo)", fontFamily: "var(--font-body)", opacity: 0.7 }}>
+                        Clears {monthTxs.length > 0 ? `${monthTxs.length} ${monthTxs.length === 1 ? "entry" : "entries"} and ` : ""}the budget
+                      </div>
+                    </div>
+                    <button onClick={() => setResetConfirm(true)}
+                      style={{ background: "#ef444418", border: "1px solid #ef444440", color: "#ef4444", borderRadius: 8, padding: "6px 12px", cursor: "pointer", fontSize: 12, fontWeight: 600, fontFamily: "var(--font-body)", whiteSpace: "nowrap" }}>
+                      Reset
+                    </button>
+                  </div>
+                ) : (
+                  <div style={{ padding: "14px 16px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                    <div style={{ fontSize: 12, color: "var(--color-text-lo)", fontFamily: "var(--font-body)", lineHeight: 1.5, flex: 1, paddingRight: 12 }}>
+                      Removes all {MONTH_FULL[month - 1]} entries and resets the budget. Cannot be undone.
+                    </div>
+                    <button onClick={handleResetMonth}
+                      style={{ background: "#ef4444", border: "none", color: "#fff", borderRadius: 8, padding: "7px 14px", cursor: "pointer", fontSize: 12, fontWeight: 700, fontFamily: "var(--font-body)", whiteSpace: "nowrap", flexShrink: 0 }}>
+                      Confirm
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
+          </SheetContent>
+        </Sheet>
 
         <AnimatePresence>
           {toast && (

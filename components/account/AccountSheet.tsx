@@ -177,9 +177,29 @@ export function AccountSheet({
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
+      {/* z-[60] on both layers: this sheet is opened from inside the Settings
+          sheet, which sits at Radix's default z-50. Equal z-index would leave
+          the stacking order down to portal mount order — correct today, silently
+          wrong the moment either sheet's mount timing changes.
+
+          The scrim is lighter than the default bg-black/50 because it lands on
+          top of the Settings scrim, and two at full strength stack to ~75% —
+          dark enough that the panel underneath reads as broken rather than
+          inert. */}
       <SheetContent
         side="bottom"
-        className="mx-auto max-h-[92dvh] w-full max-w-[480px] gap-0 overflow-y-auto rounded-t-[22px] border-border bg-card px-5 pt-5 pb-[calc(env(safe-area-inset-bottom)+1.75rem)] font-sans"
+        overlayClassName="z-[60] bg-black/25"
+        className={cn(
+          "z-[60] mx-auto max-h-[92dvh] w-full max-w-[480px] gap-0 overflow-y-auto",
+          "rounded-t-[22px] border-border bg-card px-5 pt-5 font-sans",
+          "pb-[calc(env(safe-area-inset-bottom)+1.75rem)]",
+          // Centred from 768px up, to match the Settings sheet this opens from —
+          // a bottom-anchored panel over a centred one reads as two unrelated
+          // surfaces. Centring via inset-y-0 + my-auto + h-fit, never a
+          // translate: Radix animates transform on this element.
+          "md:inset-y-0 md:my-auto md:h-fit md:max-h-[88dvh] md:rounded-[22px] md:border md:pb-7",
+          "md:data-[state=open]:slide-in-from-bottom-4 md:data-[state=closed]:slide-out-to-bottom-4",
+        )}
       >
         {step === "code" && (
           <button

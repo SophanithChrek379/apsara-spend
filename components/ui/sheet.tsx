@@ -46,6 +46,7 @@ function SheetOverlay({
 
 function SheetContent({
   className,
+  overlayClassName,
   children,
   side = "right",
   showCloseButton = true,
@@ -53,10 +54,17 @@ function SheetContent({
 }: React.ComponentProps<typeof SheetPrimitive.Content> & {
   side?: "top" | "right" | "bottom" | "left"
   showCloseButton?: boolean
+  /**
+   * Not upstream. Both layers of a sheet are `z-50`, so when one sheet opens
+   * over another the two only stack correctly by portal mount order — which is
+   * implicit and easy to break. This lets a nested sheet raise its scrim to
+   * match the z-index it gives its content, and say so in the JSX.
+   */
+  overlayClassName?: string
 }) {
   return (
     <SheetPortal>
-      <SheetOverlay />
+      <SheetOverlay className={overlayClassName} />
       <SheetPrimitive.Content
         data-slot="sheet-content"
         className={cn(
