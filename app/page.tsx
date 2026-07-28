@@ -990,9 +990,6 @@ export default function ApsaraSpendPage() {
   // K3 — Splash is shown until isLoaded fires + 400ms grace period.
   // Covers localStorage hydration so user never sees an empty/default-state flash.
   const [showSplash,       setShowSplash]       = useState(true);
-  // GN1 — First-run onboarding: 3-step tooltip overlay shown once after first budget is set
-  const [showOnboarding,   setShowOnboarding]   = useState(false);
-  const [onboardStep,      setOnboardStep]      = useState(0);
   // GN2 — Compute modal mode once; update only on window resize (not every render)
   const pageModalMode = useMemo(() => {
     if (typeof window === "undefined") return "sheet" as const;
@@ -1123,13 +1120,7 @@ export default function ApsaraSpendPage() {
   // 200ms is enough for the exit animation to start cleanly; faster on cached loads.
   useEffect(() => {
     if (!isLoaded) return;
-    const t = setTimeout(() => {
-      setShowSplash(false);
-      // GN1 — Show onboarding right after splash on first-ever open
-      if (typeof window !== "undefined" && !localStorage.getItem("apsara_onboarded_v2")) {
-        setTimeout(() => { setOnboardStep(0); setShowOnboarding(true); }, 400);
-      }
-    }, 200);
+    const t = setTimeout(() => setShowSplash(false), 200);
     return () => clearTimeout(t);
   }, [isLoaded]);
 
@@ -2460,102 +2451,6 @@ export default function ApsaraSpendPage() {
             </motion.div>
           </motion.div>
         )}
-      </AnimatePresence>
-
-      {/* ════ GN1  FIRST-RUN ONBOARDING — 3-step tooltip overlay ════ */}
-      <AnimatePresence>
-        {showOnboarding && (() => {
-          const steps = [
-            {
-              icon: "💰",
-              title: "Set a monthly budget",
-              body: "Everything tracks against it — you'll always know what's left and when you're nearing the limit.",
-              hint: "You can update your budget at any time.",
-            },
-            {
-              icon: "🧾",
-              title: "Log expenses easily",
-              body: "Tap Add Expense to log anything in USD or KHR. Add a note, pick a category, and you're done.",
-              hint: "Swipe any row left to edit or delete it.",
-            },
-            {
-              icon: "📅",
-              title: "Ready to start?",
-              body: "Set your budget for this month and begin tracking. It only takes a few seconds.",
-              hint: "Pick any amount — you can always adjust it later in Settings.",
-            },
-          ];
-          const step = steps[onboardStep];
-          const isLast = onboardStep === steps.length - 1;
-
-          const dismiss = (openModal = false) => {
-            setShowOnboarding(false);
-            localStorage.setItem("apsara_onboarded_v2", "1");
-            if (openModal) {
-              setBudgetInput("");
-              setShowBudgetModal(true);
-            }
-          };
-
-          return (
-            <motion.div
-              key="onboarding"
-              initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-              transition={{ duration: 0.25 }}
-              style={{ position: "fixed", inset: 0, background: "rgba(5,7,12,0.84)", zIndex: 900, display: "flex", alignItems: "flex-end", justifyContent: "center", padding: "0 12px calc(20px + env(safe-area-inset-bottom))" }}
-              onClick={() => dismiss(false)}
-            >
-              <motion.div
-                key={onboardStep}
-                initial={{ opacity: 0, y: 28 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 10 }}
-                transition={{ type: "spring", damping: 28, stiffness: 320 }}
-                style={{ background: "var(--color-bg-card)", borderRadius: 24, padding: "28px 24px 20px", width: "100%", maxWidth: 440, border: "1px solid var(--color-border-mid)" }}
-                onClick={(e) => e.stopPropagation()}
-              >
-                {/* Progress dots */}
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 24 }}>
-                  <span style={{ fontSize: 11, fontWeight: 500, color: "var(--color-text-lo)", fontFamily: "var(--font-body)" }}>
-                    {onboardStep + 1} of {steps.length}
-                  </span>
-                  <div style={{ display: "flex", gap: 5 }}>
-                    {steps.map((_, i) => (
-                      <div key={i} style={{ width: i === onboardStep ? 18 : 5, height: 5, borderRadius: 99, background: i === onboardStep ? "var(--accent)" : "var(--color-border-mid)", transition: "all 0.25s" }} />
-                    ))}
-                  </div>
-                </div>
-
-                {/* Emoji icon */}
-                <div style={{ fontSize: 44, textAlign: "center", marginBottom: 16, lineHeight: 1 }}>{step.icon}</div>
-
-                {/* Title + body */}
-                <div style={{ fontSize: 20, fontWeight: 700, color: "var(--color-text-hi)", fontFamily: "var(--font-headline)", textAlign: "center", marginBottom: 8, letterSpacing: "-0.01em" }}>{step.title}</div>
-                <div style={{ fontSize: 14, color: "var(--color-text-lo)", fontFamily: "var(--font-body)", textAlign: "center", lineHeight: 1.65, marginBottom: 16 }}>{step.body}</div>
-
-                {/* Hint */}
-                <div style={{ background: "var(--color-bg-page)", border: "1px solid var(--color-border)", borderRadius: 10, padding: "8px 14px", marginBottom: 20, display: "flex", alignItems: "flex-start", gap: 8 }}>
-                  <Lightbulb size={13} color="var(--color-text-lo)" strokeWidth={1.8} style={{ flexShrink: 0, marginTop: 1 }} />
-                  <span style={{ fontSize: 12, color: "var(--color-text-lo)", fontFamily: "var(--font-body)", lineHeight: 1.55 }}>{step.hint}</span>
-                </div>
-
-                {/* Actions */}
-                <div style={{ display: "flex", gap: 10 }}>
-                  {!isLast && (
-                    <button onClick={() => dismiss(false)}
-                      style={{ padding: "12px 0", borderRadius: 12, border: "1px solid var(--color-border-mid)", background: "transparent", color: "var(--color-text-lo)", fontSize: 13, fontFamily: "var(--font-body)", cursor: "pointer", flex: 1 }}>
-                      Skip
-                    </button>
-                  )}
-                  <button
-                    onClick={() => isLast ? dismiss(true) : setOnboardStep((s) => s + 1)}
-                    className="btn-primary"
-                    style={{ padding: "12px 0", fontSize: 14, fontFamily: "var(--font-body)", flex: isLast ? 1 : 2, display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}>
-                    {isLast ? "Set my budget →" : "Next →"}
-                  </button>
-                </div>
-              </motion.div>
-            </motion.div>
-          );
-        })()}
       </AnimatePresence>
 
       <main className="main-wrap"
