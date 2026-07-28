@@ -53,8 +53,12 @@ export const PERIOD_LABELS: Record<ReportPeriod, string> = {
  *
  * `anchor` is the month the dashboard is currently showing, so opening the
  * report from June reports on June — not on whatever today happens to be.
- * "This year" runs January → anchor rather than the whole calendar year, so it
- * never reports on months that haven't happened yet.
+ * "This year" is the anchor's whole calendar year, January → December: the
+ * period names a year, and clipping it at the anchor made it silently hide
+ * entries the user can see elsewhere in the app (opening the report from
+ * January reported on January alone). Months with no entries contribute
+ * nothing, and only months actually given a budget enter the budget
+ * denominator, so the empty tail costs no accuracy.
  */
 export const monthsInPeriod = (
   period: ReportPeriod,
@@ -67,8 +71,8 @@ export const monthsInPeriod = (
     case "3mo":
       return [addMonths(anchor, -2), addMonths(anchor, -1), anchor];
     case "year": {
-      const { year, month } = parseMonth(anchor);
-      return Array.from({ length: month }, (_, i) => monthKeyOf(year, i + 1));
+      const { year } = parseMonth(anchor);
+      return Array.from({ length: 12 }, (_, i) => monthKeyOf(year, i + 1));
     }
     case "all":
       return ledgerMonths.length > 0 ? ledgerMonths : [anchor];
@@ -79,9 +83,8 @@ export const monthsInPeriod = (
  * The comparable window immediately before this one, for the "n more than last
  * period" delta. "All time" has nothing before it, so it gets no delta.
  *
- * "This year" compares against the same slice of the previous year (Jan → the
- * same month) rather than the full 12, so a partial year isn't measured against
- * a complete one.
+ * "This year" compares against the previous calendar year, matching the window
+ * it now covers.
  */
 const previousPeriod = (period: ReportPeriod, anchor: string): string[] | null => {
   switch (period) {
@@ -90,8 +93,8 @@ const previousPeriod = (period: ReportPeriod, anchor: string): string[] | null =
     case "3mo":
       return [addMonths(anchor, -5), addMonths(anchor, -4), addMonths(anchor, -3)];
     case "year": {
-      const { year, month } = parseMonth(anchor);
-      return Array.from({ length: month }, (_, i) => monthKeyOf(year - 1, i + 1));
+      const { year } = parseMonth(anchor);
+      return Array.from({ length: 12 }, (_, i) => monthKeyOf(year - 1, i + 1));
     }
     case "all":
       return null;

@@ -1331,11 +1331,13 @@ export default function ApsaraSpendPage() {
     const first = label(report.months[0]);
     const last  = label(report.months[report.months.length - 1]);
     if (report.months.length === 1) return last.full;
+    // A whole calendar year is named by the year, not by "Jan – Dec 2026".
+    if (reportPeriod === "year") return String(last.year);
     // Same year needs the year printed once, at the end: "May – Jul 2026".
     return first.year === last.year
       ? `${MONTHS[first.m - 1]} – ${MONTHS[last.m - 1]} ${last.year}`
       : `${first.short} – ${last.short}`;
-  }, [report]);
+  }, [report, reportPeriod]);
 
   // Tapping a category bar is a jump back to the dashboard with that filter on.
   // The filter only describes the month on screen, so a category the report
