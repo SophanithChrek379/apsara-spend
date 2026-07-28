@@ -20,6 +20,8 @@ import { isoFromDay, dayFromIso, monthKeyFromIso, todayDay, formatDisplayDate } 
 import { buildReport, type ReportPeriod } from "@/lib/report";
 import { CATEGORIES } from "@/lib/categories";
 import { ReportSheet } from "@/components/report/ReportSheet";
+import { AccountSheet, type AuthMode } from "@/components/account/AccountSheet";
+import { signOut as signOutAccount } from "@/lib/ledger/account";
 
 interface Toast {
   msg: string;
@@ -985,11 +987,19 @@ export default function ApsaraSpendPage() {
     pendingCount,
     cacheCorrupted,
     syncNow,
+    account,
+    refreshAccount,
+    adoptAccount,
+    resetToAnonymous,
   } = useSyncedLedger();
 
   // K3 — Splash is shown until isLoaded fires + 400ms grace period.
   // Covers localStorage hydration so user never sees an empty/default-state flash.
   const [showSplash,       setShowSplash]       = useState(true);
+  // AC1 — Email + OTP account sheet, opened from Settings in one of two modes.
+  const [showAccount,      setShowAccount]      = useState(false);
+  const [accountMode,      setAccountMode]      = useState<AuthMode>("signup");
+  const [signOutConfirm,   setSignOutConfirm]   = useState(false);
   // GN2 — Compute modal mode once; update only on window resize (not every render)
   const pageModalMode = useMemo(() => {
     if (typeof window === "undefined") return "sheet" as const;
@@ -1488,6 +1498,38 @@ export default function ApsaraSpendPage() {
   // Reads straight from localStorage rather than React state, so the file is a
   // faithful copy of what's on disk — the whole point of taking it before a
   // migration. Exports every month, not just the one on screen.
+  // AC1 — The account sheet resolved an identity. What that means for the
+  // ledger depends entirely on which flow produced it:
+  //
+  //   signup  the uid never changed, so the data on screen is already the right
+  //           data. Only the account label needs re-reading.
+  //   login   a different identity took over the device. adoptAccount drops the
+  //           local cache and snapshot before pulling, so the previous
+  //           occupant's rows can never be uploaded into the account.
+  const handleAuthenticated = useCallback(async (
+    userId: string,
+    mode: AuthMode,
+    email: string,
+  ) => {
+    if (mode === "signup") {
+      await refreshAccount();
+      showToast(`Backed up to ${email}.`, "success");
+      return;
+    }
+    await adoptAccount(userId);
+    showToast(`Logged in as ${email}.`, "success");
+  }, [refreshAccount, adoptAccount, showToast]);
+
+  // Ends the session, then mints a fresh anonymous one so the app stays usable
+  // and the next person on this device does not inherit the ledger.
+  const handleSignOut = useCallback(async () => {
+    setSignOutConfirm(false);
+    setShowSettings(false);
+    await signOutAccount();
+    await resetToAnonymous();
+    showToast("Signed out. This device is back to a local ledger.", "info");
+  }, [resetToAnonymous, showToast]);
+
   const handleExport = (format: "json" | "csv") => {
     try {
       const count = format === "json" ? downloadBackupJson(data) : downloadCsv(data);
@@ -2923,7 +2965,7 @@ export default function ApsaraSpendPage() {
             <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
               className="modal-backdrop"
               style={{ position: "fixed", inset: 0, background: "rgba(5,7,12,0.88)", zIndex: 200, display: "flex" }}
-              onClick={() => { setShowSettings(false); setResetConfirm(false); }}>
+              onClick={() => { setShowSettings(false); setResetConfirm(false); setSignOutConfirm(false); }}>
               <motion.div ref={settingsModalRef}
                 initial={pageModalMode === "center" ? MODAL_ENTER_CENTER : MODAL_ENTER_SHEET}
                 animate={pageModalMode === "center" ? MODAL_ANIM_CENTER  : MODAL_ANIM_SHEET}
@@ -2941,10 +2983,71 @@ export default function ApsaraSpendPage() {
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
                   <span style={{ fontSize: 18, fontWeight: 700, color: "var(--color-text-hi)", fontFamily: "var(--font-headline)", letterSpacing: "-0.01em" }}>Settings</span>
                   <button aria-label="Close settings"
-                    onClick={() => { setShowSettings(false); setResetConfirm(false); }}
+                    onClick={() => { setShowSettings(false); setResetConfirm(false); setSignOutConfirm(false); }}
                     style={{ background: "var(--color-bg-nav)", border: "none", borderRadius: 9, padding: 8, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}>
                     <X size={16} color="var(--color-text-lo)" strokeWidth={2} />
                   </button>
+                </div>
+
+                {/* ── Group 0: Account ──
+                    New region, so it follows the shadcn + utilities rule rather
+                    than the inline styles the groups below are grandfathered
+                    into. `bg-background` resolves to the same --color-bg-page
+                    those groups set by hand. */}
+                <div className="mb-3 rounded-[14px] bg-background px-4 py-[13px]">
+                  {account && !account.isAnonymous ? (
+                    <div className="flex items-center justify-between gap-3">
+                      <div className="min-w-0">
+                        <div className="truncate text-[13px] font-medium text-secondary-foreground">
+                          {account.email}
+                        </div>
+                        <div className="mt-0.5 flex items-center gap-1 text-[11px] text-muted-foreground">
+                          <Check size={11} strokeWidth={2.5} className="text-emerald-500" />
+                          Backed up — reachable from any device
+                        </div>
+                      </div>
+                      {!signOutConfirm ? (
+                        <button
+                          onClick={() => setSignOutConfirm(true)}
+                          className="shrink-0 cursor-pointer rounded-lg border border-border bg-secondary px-3 py-1.5 text-xs font-semibold whitespace-nowrap text-secondary-foreground">
+                          Sign out
+                        </button>
+                      ) : (
+                        <button
+                          onClick={() => void handleSignOut()}
+                          className="shrink-0 cursor-pointer rounded-lg border border-destructive/40 bg-destructive/10 px-3 py-1.5 text-xs font-semibold whitespace-nowrap text-destructive">
+                          Confirm
+                        </button>
+                      )}
+                    </div>
+                  ) : (
+                    <div className="flex items-center justify-between gap-3">
+                      <div className="min-w-0">
+                        <div className="text-[13px] font-medium text-secondary-foreground">
+                          {account?.pendingEmail ? "Finish backing up" : "Back up your data"}
+                        </div>
+                        <div className="mt-0.5 truncate text-[11px] text-muted-foreground/70">
+                          {account?.pendingEmail
+                            ? `Verify ${account.pendingEmail}`
+                            : data.transactions.length > 0
+                              ? `${data.transactions.length} ${data.transactions.length === 1 ? "entry" : "entries"} on this device only`
+                              : "This device only"}
+                        </div>
+                      </div>
+                      <div className="flex shrink-0 gap-1.5">
+                        <button
+                          onClick={() => { setAccountMode("signup"); setShowAccount(true); }}
+                          className="cursor-pointer rounded-lg border border-primary/40 bg-primary/12 px-3 py-1.5 text-xs font-semibold whitespace-nowrap text-primary">
+                          Back up
+                        </button>
+                        <button
+                          onClick={() => { setAccountMode("login"); setShowAccount(true); }}
+                          className="cursor-pointer rounded-lg border border-border bg-secondary px-3 py-1.5 text-xs font-semibold whitespace-nowrap text-secondary-foreground">
+                          Log in
+                        </button>
+                      </div>
+                    </div>
+                  )}
                 </div>
 
                 {/* ── Group 1: Appearance ── */}
@@ -3107,6 +3210,17 @@ export default function ApsaraSpendPage() {
           currency={currency}
           onPickCategory={handleReportCategory}
           onClose={() => setShowReport(false)}
+        />
+
+        {/* ── Account: email + OTP ──
+            Outside AnimatePresence for the same reason as ReportSheet: Radix
+            runs its own mount/unmount transition. */}
+        <AccountSheet
+          open={showAccount}
+          onOpenChange={setShowAccount}
+          initialMode={accountMode}
+          entryCount={data.transactions.length}
+          onAuthenticated={handleAuthenticated}
         />
 
         <AnimatePresence>

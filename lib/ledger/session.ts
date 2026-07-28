@@ -39,6 +39,17 @@ let userId: string | null = null;
 /** The uid resolved by the last successful ensureSession(), if any. */
 export const currentUserId = (): string | null => userId;
 
+/**
+ * Drops the memoised session so the next ensureSession() re-reads from
+ * supabase-js. Mandatory after anything that changes who we are — verifying a
+ * login OTP, signing out — otherwise the cached uid outlives the identity it
+ * describes and the ledger syncs against the wrong user.
+ */
+export const resetSessionCache = (): void => {
+  pending = null;
+  userId = null;
+};
+
 export const ensureSession = (): Promise<string | null> => {
   if (pending) return pending;
 

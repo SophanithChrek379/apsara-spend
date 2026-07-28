@@ -7,10 +7,12 @@ import {
   readCache, writeCache,
   readSnapshot, writeSnapshot,
   readUserId, writeUserId,
+  clearLedgerCache,
   defaultData,
 } from "@/lib/ledger/cache";
 import { diffLedger, reconcileLedger, pushedState, isUuid, type PushedState } from "@/lib/ledger/diff";
 import { ensureSession, recoverSession } from "@/lib/ledger/session";
+import { readAccount, type Account } from "@/lib/ledger/account";
 import { pushOps, ApiError } from "@/lib/ledger/api";
 
 export type SyncStatus = "loading" | "synced" | "pending" | "offline" | "error";
@@ -113,6 +115,7 @@ export function useSyncedLedger() {
   const [isLoaded, setLoaded] = useState(false);
   const [status, setStatus]   = useState<SyncStatus>("loading");
   const [pendingCount, setPendingCount] = useState(0);
+  const [account, setAccount] = useState<Account | null>(null);
   const cacheCorrupted = initial.current.corrupted;
 
   // Bumped on every local write, so a pull can tell whether the user changed
@@ -123,6 +126,9 @@ export function useSyncedLedger() {
   const syncingRef  = useRef(false);
   const resyncRef   = useRef(false);
   const quotaWarnRef = useRef(false);
+  // Declared here rather than beside its effect so the identity-switch
+  // callbacks above can cancel a queued flush before wiping the cache.
+  const timerRef    = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   dataRef.current = data;
 
@@ -263,6 +269,72 @@ export function useSyncedLedger() {
     }
   }, [adopt, adoptIdentity, pushWithAuthRetry]);
 
+  // ── Account (email + OTP on top of the anonymous session) ────────────────
+
+  /** Re-reads who Supabase says we are. Safe to call after any auth action. */
+  const refreshAccount = useCallback(async () => {
+    const next = await readAccount();
+    setAccount(next);
+    return next;
+  }, []);
+
+  /**
+   * Hand this device over to a DIFFERENT identity — the log-in path.
+   *
+   * Signing up keeps the same uid and must NOT come through here: it needs the
+   * cache preserved, which is the entire point of upgrading in place.
+   *
+   * Everything local is dropped before the pull, in this order:
+   *   1. snapshot → empty, so no pending diff exists to be flushed
+   *   2. data → empty, so the debounced effect computes zero ops
+   *   3. localStorage → cleared, so a reload mid-flight can't resurrect it
+   *
+   * Clearing the snapshot alone would be worse than doing nothing: the diff
+   * would read the previous occupant's rows as new writes and upload them into
+   * the account being logged into. With both sides empty, reconcileLedger
+   * returns the server ledger verbatim.
+   *
+   * The old anonymous user's rows stay in Postgres under their own uid. They are
+   * unreachable (RLS scopes every read to auth.uid()) and harmless.
+   */
+  const adoptAccount = useCallback(async (accountUserId: string) => {
+    if (timerRef.current) clearTimeout(timerRef.current);
+
+    const empty = defaultData();
+    snapshotRef.current = empty;
+    dataRef.current     = empty;
+    clearLedgerCache();
+    setDataRaw(empty);
+    setPendingCount(0);
+    setStatus("loading");
+    writeUserId(accountUserId);
+
+    await refreshAccount();
+    return sync({ pull: true });
+  }, [refreshAccount, sync]);
+
+  /**
+   * Post sign-out cleanup. The session is already gone by the time this runs;
+   * what's left is to make sure the next person to open the app on this device
+   * gets a fresh anonymous identity rather than the previous account's ledger.
+   */
+  const resetToAnonymous = useCallback(async () => {
+    if (timerRef.current) clearTimeout(timerRef.current);
+
+    const empty = defaultData();
+    snapshotRef.current = empty;
+    dataRef.current     = empty;
+    clearLedgerCache();
+    setDataRaw(empty);
+    setPendingCount(0);
+    setStatus("loading");
+
+    const newUserId = await ensureSession();
+    if (newUserId) writeUserId(newUserId);
+    await refreshAccount();
+    return sync({ pull: true });
+  }, [refreshAccount, sync]);
+
   // ── Boot ─────────────────────────────────────────────────────────────────
   useEffect(() => {
     let cancelled = false;
@@ -278,6 +350,7 @@ export function useSyncedLedger() {
         }
 
         adoptIdentity(userId);
+        void refreshAccount();
 
         // One-time id remap for data written before the DB existed. Legacy ids
         // are `Date.now()+random` strings, which cannot be uuid primary keys.
@@ -337,7 +410,6 @@ export function useSyncedLedger() {
   }, []);
 
   // ── Persist + push on change (debounced, as the old save effect was) ─────
-  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => {
     if (!isLoaded) return;
 
@@ -390,5 +462,11 @@ export function useSyncedLedger() {
     pendingCount,
     cacheCorrupted,
     syncNow: useCallback(() => sync({ pull: true }), [sync]),
+    // Account surface. `account` is null until the boot session resolves, so
+    // treat null as "still anonymous" rather than "signed out".
+    account,
+    refreshAccount,
+    adoptAccount,
+    resetToAnonymous,
   };
 }

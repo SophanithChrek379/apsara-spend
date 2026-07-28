@@ -100,6 +100,25 @@ export const writeCache    = (data: AppData) => writeSlot(STORAGE_KEY, data);
 export const readSnapshot  = () => readSlot(SNAPSHOT_KEY).data;
 export const writeSnapshot = (data: AppData) => writeSlot(SNAPSHOT_KEY, data);
 
+/**
+ * Wipes both ledger slots and the owning uid.
+ *
+ * Used when the identity is replaced by a *different* person — logging in, or
+ * signing out. Not to be confused with the anonymous-identity-changed path in
+ * adoptIdentity(), which deliberately keeps the cache because it is the same
+ * human on the same device whose cookie was evicted.
+ *
+ * MIGRATED_KEY is left alone on purpose: the pre-database id remap is a
+ * property of this browser's history, not of whoever is signed in.
+ */
+export const clearLedgerCache = (): void => {
+  try {
+    localStorage.removeItem(STORAGE_KEY);
+    localStorage.removeItem(SNAPSHOT_KEY);
+    localStorage.removeItem(USER_KEY);
+  } catch { /* storage unavailable — nothing to clear */ }
+};
+
 export const readUserId = (): string | null => {
   try {
     return typeof window !== "undefined" ? localStorage.getItem(USER_KEY) : null;
