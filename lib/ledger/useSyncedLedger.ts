@@ -12,7 +12,7 @@ import {
 } from "@/lib/ledger/cache";
 import { diffLedger, reconcileLedger, pushedState, isUuid, type PushedState } from "@/lib/ledger/diff";
 import { ensureSession, recoverSession } from "@/lib/ledger/session";
-import { readAccount, takeOAuthIntent, type Account } from "@/lib/ledger/account";
+import { readAccount, takeOAuthIntent, type Account, type OAuthIntent } from "@/lib/ledger/account";
 import { pushOps, ApiError } from "@/lib/ledger/api";
 
 export type SyncStatus = "loading" | "synced" | "pending" | "offline" | "error";
@@ -116,6 +116,13 @@ export function useSyncedLedger() {
   const [status, setStatus]   = useState<SyncStatus>("loading");
   const [pendingCount, setPendingCount] = useState(0);
   const [account, setAccount] = useState<Account | null>(null);
+  /**
+   * Set once, on the boot that follows a Google redirect that actually landed.
+   * OAuth navigates away, so there is no promise left for the button to await
+   * and nothing to report success from — without this the user returns to the
+   * dashboard with no confirmation that anything happened.
+   */
+  const [oauthCompleted, setOAuthCompleted] = useState<OAuthIntent | null>(null);
   const cacheCorrupted = initial.current.corrupted;
 
   // Bumped on every local write, so a pull can tell whether the user changed
@@ -269,7 +276,7 @@ export function useSyncedLedger() {
     }
   }, [adopt, adoptIdentity, pushWithAuthRetry]);
 
-  // ── Account (email + OTP on top of the anonymous session) ────────────────
+  // ── Account (Google on top of the anonymous session) ─────────────────────
 
   /** Re-reads who Supabase says we are. Safe to call after any auth action. */
   const refreshAccount = useCallback(async () => {
@@ -358,12 +365,22 @@ export function useSyncedLedger() {
         // reason this is guarded on the uid rather than on the intent alone.
         const oauthIntent = takeOAuthIntent();
         if (oauthIntent === "login" && readUserId() !== userId) {
+          setOAuthCompleted("login");
           await adoptAccount(userId);
           return;
         }
 
         adoptIdentity(userId);
-        void refreshAccount();
+        const linked = await refreshAccount();
+
+        // Only report a link that actually took. Cancelling at Google's consent
+        // screen returns on the same anonymous uid, so `isAnonymous` is what
+        // separates "linked" from "changed their mind" — the intent alone
+        // cannot, and claiming success on a cancel would be a lie the Settings
+        // panel immediately contradicts.
+        if (oauthIntent === "signup" && linked && !linked.isAnonymous) {
+          setOAuthCompleted("signup");
+        }
 
         // One-time id remap for data written before the DB existed. Legacy ids
         // are `Date.now()+random` strings, which cannot be uuid primary keys.
@@ -481,5 +498,7 @@ export function useSyncedLedger() {
     refreshAccount,
     adoptAccount,
     resetToAnonymous,
+    oauthCompleted,
+    clearOAuthCompleted: useCallback(() => setOAuthCompleted(null), []),
   };
 }

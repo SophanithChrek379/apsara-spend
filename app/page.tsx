@@ -1004,13 +1004,15 @@ export default function ApsaraSpendPage() {
     account,
     refreshAccount,
     adoptAccount,
+    oauthCompleted,
+    clearOAuthCompleted,
     resetToAnonymous,
   } = useSyncedLedger();
 
   // K3 — Splash is shown until isLoaded fires + 400ms grace period.
   // Covers localStorage hydration so user never sees an empty/default-state flash.
   const [showSplash,       setShowSplash]       = useState(true);
-  // AC1 — Email + OTP account sheet, opened from Settings in one of two modes.
+  // AC1 — Google account sheet, opened from Settings in one of two modes.
   const [showAccount,      setShowAccount]      = useState(false);
   const [accountMode,      setAccountMode]      = useState<AuthMode>("signup");
   const [signOutConfirm,   setSignOutConfirm]   = useState(false);
@@ -1527,27 +1529,20 @@ export default function ApsaraSpendPage() {
   // Reads straight from localStorage rather than React state, so the file is a
   // faithful copy of what's on disk — the whole point of taking it before a
   // migration. Exports every month, not just the one on screen.
-  // AC1 — The account sheet resolved an identity. What that means for the
-  // ledger depends entirely on which flow produced it:
-  //
-  //   signup  the uid never changed, so the data on screen is already the right
-  //           data. Only the account label needs re-reading.
-  //   login   a different identity took over the device. adoptAccount drops the
-  //           local cache and snapshot before pulling, so the previous
-  //           occupant's rows can never be uploaded into the account.
-  const handleAuthenticated = useCallback(async (
-    userId: string,
-    mode: AuthMode,
-    email: string,
-  ) => {
-    if (mode === "signup") {
-      await refreshAccount();
-      showToast(`Signed up as ${email}.`, "success");
-      return;
-    }
-    await adoptAccount(userId);
-    showToast(`Logged in as ${email}.`, "success");
-  }, [refreshAccount, adoptAccount, showToast]);
+  // AC1 — Report a Google flow that completed. There is no callback for this:
+  // OAuth navigates away, so the sheet that started it no longer exists by the
+  // time it succeeds. useSyncedLedger raises the flag on the boot that follows
+  // the redirect, and only when the link actually took — a cancel comes back
+  // anonymous and says nothing.
+  useEffect(() => {
+    if (!oauthCompleted) return;
+    const who = account?.email ? ` as ${account.email}` : "";
+    showToast(
+      oauthCompleted === "signup" ? `Signed up${who}.` : `Logged in${who}.`,
+      "success",
+    );
+    clearOAuthCompleted();
+  }, [oauthCompleted, account, showToast, clearOAuthCompleted]);
 
   // Ends the session, then mints a fresh anonymous one so the app stays usable
   // and the next person on this device does not inherit the ledger.
@@ -3026,7 +3021,7 @@ export default function ApsaraSpendPage() {
           onClose={() => setShowReport(false)}
         />
 
-        {/* ── Account: email + OTP ──
+        {/* ── Account: Google ──
             Outside AnimatePresence for the same reason as ReportSheet: Radix
             runs its own mount/unmount transition. */}
         <AccountSheet
@@ -3034,7 +3029,6 @@ export default function ApsaraSpendPage() {
           onOpenChange={setShowAccount}
           initialMode={accountMode}
           entryCount={data.transactions.length}
-          onAuthenticated={handleAuthenticated}
         />
 
         {/* ── Settings ──
@@ -3140,14 +3134,12 @@ export default function ApsaraSpendPage() {
                 <div className="flex items-center justify-between gap-3">
                   <div className="min-w-0">
                     <div className="text-[13px] font-medium text-secondary-foreground">
-                      {account?.pendingEmail ? "Finish signing up" : "Create an account"}
+                      Create an account
                     </div>
                     <div className="mt-0.5 truncate text-[11px] text-muted-foreground/70">
-                      {account?.pendingEmail
-                        ? `Verify ${account.pendingEmail}`
-                        : data.transactions.length > 0
-                          ? `${data.transactions.length} ${data.transactions.length === 1 ? "entry" : "entries"} on this device only`
-                          : "This device only"}
+                      {data.transactions.length > 0
+                        ? `${data.transactions.length} ${data.transactions.length === 1 ? "entry" : "entries"} on this device only`
+                        : "This device only"}
                     </div>
                   </div>
                   <div className="flex shrink-0 gap-1.5">
