@@ -15,7 +15,7 @@
 // the uid up; useSyncedLedger owns what that means for the data.
 
 import * as React from "react";
-import { ArrowLeft, Check, Loader2, Mail, ShieldCheck } from "lucide-react";
+import { ArrowLeft, Check, HelpCircle, Loader2, Mail, ShieldCheck } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -34,6 +34,8 @@ import {
 import {
   requestLoginCode,
   requestSignupCode,
+  startGoogleLogin,
+  startGoogleSignup,
   verifyLoginCode,
   verifySignupCode,
   type AuthResult,
@@ -46,6 +48,20 @@ const CODE_LENGTH = 6;
 
 /** Matches Supabase's own default cooldown between OTP sends. */
 const RESEND_COOLDOWN_S = 60;
+
+/**
+ * How long to wait on the code step before offering help, unprompted.
+ *
+ * A send that Supabase accepts can still die inside the mail provider — an
+ * unverified sending domain, a bounce, a spam filter. That happens after the
+ * API has already answered 200, so the app is never told and cannot show an
+ * error. Silence is the only symptom, and a user staring at six empty boxes
+ * has no way to know whether to keep waiting.
+ *
+ * 25s is past the point where a working email has almost always landed, and
+ * still short enough to reach someone before they give up and close the sheet.
+ */
+const HELP_AFTER_MS = 25_000;
 
 /** Deliberately permissive — the real check is whether the code arrives. */
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
@@ -79,6 +95,10 @@ export function AccountSheet({
   const [error, setError]     = React.useState<string | null>(null);
   const [notice, setNotice]   = React.useState<string | null>(null);
   const [cooldown, setCooldown] = React.useState(0);
+  const [showHelp, setShowHelp] = React.useState(false);
+  // Bumped on every accepted send, so a resend restarts the help timer rather
+  // than leaving the previous attempt's panel on screen as if nothing happened.
+  const [sendCount, setSendCount] = React.useState(0);
 
   // Re-arm on each open so a cancelled attempt never leaks into the next one.
   React.useEffect(() => {
@@ -90,6 +110,8 @@ export function AccountSheet({
     setError(null);
     setNotice(null);
     setCooldown(0);
+    setShowHelp(false);
+    setSendCount(0);
   }, [open, initialMode]);
 
   React.useEffect(() => {
@@ -97,6 +119,15 @@ export function AccountSheet({
     const t = setTimeout(() => setCooldown((s) => s - 1), 1000);
     return () => clearTimeout(t);
   }, [cooldown]);
+
+  // Arm the "didn't get it?" panel whenever we land on the code step, and
+  // re-arm on each resend. Leaving the step tears the timer down with it.
+  React.useEffect(() => {
+    if (step !== "code") return;
+    setShowHelp(false);
+    const t = setTimeout(() => setShowHelp(true), HELP_AFTER_MS);
+    return () => clearTimeout(t);
+  }, [step, sendCount]);
 
   const trimmedEmail = email.trim().toLowerCase();
   const emailValid   = EMAIL_RE.test(trimmedEmail);
@@ -119,6 +150,7 @@ export function AccountSheet({
 
     if (result.ok) {
       setCooldown(RESEND_COOLDOWN_S);
+      setSendCount((n) => n + 1);
       return true;
     }
 
@@ -138,6 +170,28 @@ export function AccountSheet({
     setError(result.message);
     return false;
   }, [trimmedEmail]);
+
+  /**
+   * Hands off to Google. There is no success branch to write: when this works
+   * the browser is already leaving the page, so `busy` stays set and the sheet
+   * sits inert for the moment before unload rather than flickering back to an
+   * interactive state nobody gets to use.
+   */
+  const handleGoogle = React.useCallback(async () => {
+    if (busy) return;
+    setBusy(true);
+    setError(null);
+    setNotice(null);
+
+    const result = mode === "signup"
+      ? await startGoogleSignup()
+      : await startGoogleLogin();
+
+    if (!result.ok) {
+      setBusy(false);
+      setError(result.message);
+    }
+  }, [busy, mode]);
 
   const handleEmailSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -244,6 +298,23 @@ export function AccountSheet({
 
         {step === "email" ? (
           <form onSubmit={handleEmailSubmit} className="mt-5">
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => void handleGoogle()}
+              disabled={busy}
+              className="h-11 w-full rounded-[12px] border-border bg-background text-[14px] font-semibold"
+            >
+              <GoogleMark />
+              Continue with Google
+            </Button>
+
+            <div className="my-4 flex items-center gap-3">
+              <span className="h-px flex-1 bg-border" />
+              <span className="text-[11px] font-medium text-muted-foreground">or</span>
+              <span className="h-px flex-1 bg-border" />
+            </div>
+
             <Label htmlFor="account-email" className="text-xs font-medium text-muted-foreground">
               Email address
             </Label>
@@ -330,6 +401,32 @@ export function AccountSheet({
               {cooldown > 0 ? `Resend code in ${cooldown}s` : "Resend code"}
             </button>
 
+            {/* The silent-failure net. Nothing here is triggered by an error,
+                because there is no error to catch — it appears on a timer and
+                says the three things that actually resolve a missing code. */}
+            {showHelp && !busy && (
+              <div className="mt-4 rounded-[10px] border border-border bg-background px-3.5 py-3 animate-in fade-in slide-in-from-bottom-2 duration-300">
+                <p className="flex items-center gap-1.5 text-xs font-semibold text-foreground">
+                  <HelpCircle size={13} strokeWidth={2.2} className="shrink-0 text-muted-foreground" />
+                  Still no code?
+                </p>
+                <ul className="mt-2 list-disc space-y-1 pl-4 text-[11px] leading-[1.55] text-muted-foreground marker:text-muted-foreground/50">
+                  <li>Check your spam or junk folder — first codes often land there.</li>
+                  <li>
+                    Make sure <span className="font-medium text-foreground">{trimmedEmail}</span> is spelled correctly.
+                  </li>
+                  <li>Some mail providers take up to a minute to deliver.</li>
+                </ul>
+                <button
+                  type="button"
+                  onClick={() => { setStep("email"); setError(null); setCode(""); }}
+                  className="mt-2.5 cursor-pointer text-[11px] font-semibold text-primary transition-opacity hover:opacity-80"
+                >
+                  Try a different email
+                </button>
+              </div>
+            )}
+
             {isSignup && (
               <p className="mt-4 flex items-start justify-center gap-1.5 text-[11px] leading-[1.5] text-muted-foreground/80">
                 <Check size={12} strokeWidth={2.4} className="mt-px shrink-0 text-emerald-500" />
@@ -340,6 +437,23 @@ export function AccountSheet({
         )}
       </SheetContent>
     </Sheet>
+  );
+}
+
+/**
+ * Google's mark, inline because lucide dropped brand icons and the four hexes
+ * are Google's, not this app's theme — they must not track the theme switcher
+ * or shift in light mode. Brand assets are the one place a raw colour is
+ * correct; everything else on the button is still a token.
+ */
+function GoogleMark() {
+  return (
+    <svg viewBox="0 0 48 48" aria-hidden="true" className="size-[18px]">
+      <path fill="#4285F4" d="M45.12 24.5c0-1.56-.14-3.06-.4-4.5H24v8.51h11.84c-.51 2.75-2.06 5.08-4.39 6.64v5.52h7.11c4.16-3.83 6.56-9.47 6.56-16.17z" />
+      <path fill="#34A853" d="M24 46c5.94 0 10.92-1.97 14.56-5.33l-7.11-5.52c-1.97 1.32-4.49 2.1-7.45 2.1-5.73 0-10.58-3.87-12.31-9.07H4.34v5.7C7.96 41.07 15.4 46 24 46z" />
+      <path fill="#FBBC05" d="M11.69 28.18C11.25 26.86 11 25.45 11 24s.25-2.86.69-4.18v-5.7H4.34C2.85 17.09 2 20.45 2 24s.85 6.91 2.34 9.88l7.35-5.7z" />
+      <path fill="#EA4335" d="M24 10.75c3.23 0 6.13 1.11 8.41 3.29l6.31-6.31C34.91 4.18 29.93 2 24 2 15.4 2 7.96 6.93 4.34 14.12l7.35 5.7c1.73-5.2 6.58-9.07 12.31-9.07z" />
+    </svg>
   );
 }
 

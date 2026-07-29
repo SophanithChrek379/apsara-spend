@@ -27,6 +27,8 @@ export type AuthFailure =
   | "no_account"       // log-in: nothing registered under that address
   | "rate_limited"     // too many sends; Supabase's per-hour email cap
   | "bad_code"         // wrong or expired OTP
+  | "send_failed"      // Supabase accepted the request, the mailer refused it
+  | "oauth_unavailable" // provider switched off, or manual linking disabled
   | "offline"
   | "unknown";
 
@@ -39,6 +41,8 @@ const MESSAGES: Record<AuthFailure, string> = {
   no_account:   "No account found for that email.",
   rate_limited: "Too many codes requested. Try again in a few minutes.",
   bad_code:     "That code is wrong or has expired.",
+  send_failed:  "We couldn't send the email. Try again in a moment, or use a different address.",
+  oauth_unavailable: "Google sign-in isn't available right now. Use your email instead.",
   offline:      "You're offline. Reconnect and try again.",
   unknown:      "Something went wrong. Please try again.",
 };
@@ -66,9 +70,22 @@ const classify = (err: { code?: string; status?: number; message?: string } | nu
   if (code === "over_email_send_rate_limit" || err.status === 429)   return "rate_limited";
   if (code === "otp_expired" || code === "invalid_credentials")      return "bad_code";
 
+  // Supabase accepted the request and the SMTP relay refused it — a bad API
+  // key, an unverified sending domain, the provider's own throttle. Worth its
+  // own message rather than "unknown": the user can act on it by waiting or
+  // trying another address, and neither is obvious from a generic failure.
+  if (code === "unexpected_failure" && msg.includes("email"))        return "send_failed";
+
+  // Both are project configuration, not anything the visitor did wrong — so
+  // the message points them at the email flow instead of asking them to retry
+  // something that will fail identically every time.
+  if (code === "manual_linking_disabled" || msg.includes("manual linking")) return "oauth_unavailable";
+  if (code === "provider_disabled" || msg.includes("provider is not enabled")) return "oauth_unavailable";
+
   if (msg.includes("already been registered") || msg.includes("already registered")) return "email_taken";
   if (msg.includes("signups not allowed"))                                            return "no_account";
   if (msg.includes("rate limit"))                                                     return "rate_limited";
+  if (msg.includes("error sending"))                                                  return "send_failed";
   if (msg.includes("expired") || msg.includes("invalid"))                             return "bad_code";
 
   return "unknown";
@@ -186,6 +203,84 @@ export const verifyLoginCode = async (email: string, token: string): Promise<Aut
     return fail(isOffline() ? "offline" : "unknown");
   }
 };
+
+// ── Google (OAuth) ──────────────────────────────────────────────────────────
+
+/**
+ * OAuth is a full page navigation, not a request. The app unloads, Google takes
+ * over, and what comes back is a cold boot — so nothing held in React state
+ * survives to tell the returning app what it was in the middle of.
+ *
+ * That matters because the two flows demand opposite handling of local data and
+ * the uid alone cannot separate them on the way back:
+ *
+ *   signup/link  keeps the anonymous uid — the cache must be KEPT
+ *   login        arrives on a different uid — the cache must be DROPPED
+ *   cancelled    keeps the anonymous uid — the cache must be KEPT
+ *
+ * A cancelled login and a completed link are indistinguishable by uid. So the
+ * intent is parked in localStorage before we leave and read back on boot.
+ */
+const OAUTH_INTENT_KEY = "apsara_oauth_intent";
+
+export type OAuthIntent = "signup" | "login";
+
+/**
+ * Reads the parked intent and clears it in the same breath. Clearing is
+ * unconditional and deliberate: an intent left armed would re-fire on the next
+ * ordinary boot, and a stale "login" wipes a cache nobody asked it to.
+ */
+export const takeOAuthIntent = (): OAuthIntent | null => {
+  try {
+    const value = localStorage.getItem(OAUTH_INTENT_KEY);
+    localStorage.removeItem(OAUTH_INTENT_KEY);
+    return value === "signup" || value === "login" ? value : null;
+  } catch {
+    return null;
+  }
+};
+
+/**
+ * On success this never resolves in any useful sense — the browser is already
+ * navigating to Google. Only the failure path gets to run, which is why the
+ * caller keeps its busy state set rather than clearing it on return.
+ */
+const startOAuth = async (intent: OAuthIntent): Promise<AuthResult> => {
+  if (isOffline()) return fail("offline");
+
+  try {
+    localStorage.setItem(OAUTH_INTENT_KEY, intent);
+  } catch {
+    // Private mode. The boot then can't tell a login from a link, and falls
+    // through to the conservative path that keeps local data.
+  }
+
+  try {
+    const supabase = createClient();
+    const options  = { redirectTo: window.location.origin };
+
+    // linkIdentity attaches Google to the anonymous user we already are, which
+    // is the same uid-preserving trick updateUser({ email }) pulls for OTP.
+    const { error } = intent === "signup"
+      ? await supabase.auth.linkIdentity({ provider: "google", options })
+      : await supabase.auth.signInWithOAuth({ provider: "google", options });
+
+    if (error) {
+      takeOAuthIntent();
+      return fail(classify(error));
+    }
+    return { ok: true, data: undefined };
+  } catch {
+    takeOAuthIntent();
+    return fail(isOffline() ? "offline" : "unknown");
+  }
+};
+
+/** Attach Google to this device's anonymous user. Same uid, data carries over. */
+export const startGoogleSignup = (): Promise<AuthResult> => startOAuth("signup");
+
+/** Replace this device's identity with an existing Google account. */
+export const startGoogleLogin = (): Promise<AuthResult> => startOAuth("login");
 
 // ── Sign out ────────────────────────────────────────────────────────────────
 

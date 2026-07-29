@@ -12,7 +12,7 @@ import {
 } from "@/lib/ledger/cache";
 import { diffLedger, reconcileLedger, pushedState, isUuid, type PushedState } from "@/lib/ledger/diff";
 import { ensureSession, recoverSession } from "@/lib/ledger/session";
-import { readAccount, type Account } from "@/lib/ledger/account";
+import { readAccount, takeOAuthIntent, type Account } from "@/lib/ledger/account";
 import { pushOps, ApiError } from "@/lib/ledger/api";
 
 export type SyncStatus = "loading" | "synced" | "pending" | "offline" | "error";
@@ -346,6 +346,19 @@ export function useSyncedLedger() {
 
         if (!userId) {
           setStatus("offline");
+          return;
+        }
+
+        // Back from a Google redirect, maybe. The intent is consumed on every
+        // boot so a stale one can never survive to wipe a later session.
+        //
+        // Only a login that actually landed on a DIFFERENT uid triggers the
+        // hard reset. A link keeps the anonymous uid and falls through with the
+        // cache intact, and so does a cancelled login — which is the whole
+        // reason this is guarded on the uid rather than on the intent alone.
+        const oauthIntent = takeOAuthIntent();
+        if (oauthIntent === "login" && readUserId() !== userId) {
+          await adoptAccount(userId);
           return;
         }
 
