@@ -98,6 +98,13 @@ export interface Account {
   /** Address awaiting OTP confirmation, if a sign-up is mid-flight. */
   pendingEmail: string | null;
   isAnonymous: boolean;
+  /**
+   * Identities attached to this uid — "email", "google", … Settings reads it to
+   * decide whether to offer Connect Google, which must not appear once Google
+   * is already linked: linkIdentity() would reject the duplicate, and the
+   * rejection only surfaces after a pointless round trip to the consent screen.
+   */
+  providers: string[];
 }
 
 /** Who the browser currently is, as far as Supabase is concerned. */
@@ -114,6 +121,7 @@ export const readAccount = async (): Promise<Account | null> => {
       // Supabase leaves is_anonymous true until the email is confirmed, which is
       // exactly the semantics the UI wants: not backed up until verified.
       isAnonymous:  u.is_anonymous === true,
+      providers:    (u.identities ?? []).map((i) => i.provider),
     };
   } catch {
     return null;
@@ -276,11 +284,54 @@ const startOAuth = async (intent: OAuthIntent): Promise<AuthResult> => {
   }
 };
 
-/** Attach Google to this device's anonymous user. Same uid, data carries over. */
-export const startGoogleSignup = (): Promise<AuthResult> => startOAuth("signup");
+/**
+ * Attach Google to whoever we currently are. Same uid either way, so the ledger
+ * is never touched — which is what lets Settings offer this to a signed-in user
+ * without making them sign out first. Signing out to link would drop them onto
+ * a fresh anonymous user, and linking THAT to a Google account already tied to
+ * their real one just fails, stranding them on an empty ledger.
+ */
+export const linkGoogleIdentity = (): Promise<AuthResult> => startOAuth("signup");
 
 /** Replace this device's identity with an existing Google account. */
 export const startGoogleLogin = (): Promise<AuthResult> => startOAuth("login");
+
+/**
+ * Reads an error handed back on the OAuth redirect, and clears it from the URL
+ * so a reload cannot replay it.
+ *
+ * A rejected link fails server-side during the callback, long after the button
+ * that started it stopped existing — the app has unloaded and come back. So the
+ * only trace is in the URL, and without reading it here the user is dropped
+ * back on an unchanged screen with no idea the attempt failed.
+ *
+ * @returns a user-facing message, or null when there is nothing worth saying.
+ */
+export const takeOAuthError = (): string | null => {
+  if (typeof window === "undefined") return null;
+
+  const query = new URLSearchParams(window.location.search);
+  const hash  = new URLSearchParams(window.location.hash.replace(/^#/, ""));
+  const kind  = query.get("error")             ?? hash.get("error");
+  const code  = query.get("error_code")        ?? hash.get("error_code");
+  const desc  = query.get("error_description") ?? hash.get("error_description");
+
+  if (!kind && !code && !desc) return null;
+
+  window.history.replaceState({}, "", window.location.pathname);
+
+  const text = decodeURIComponent(desc ?? "").toLowerCase();
+
+  // Backing out at the consent screen is a decision, not a fault. Reporting it
+  // would tell the user something they already know and did on purpose.
+  if (kind === "access_denied" || text.includes("cancel") || text.includes("denied")) {
+    return null;
+  }
+  if (code === "identity_already_exists" || text.includes("already")) {
+    return "That Google account is already linked to a different account.";
+  }
+  return "Google sign-in didn't finish. Try again, or use your email.";
+};
 
 // ── Sign out ────────────────────────────────────────────────────────────────
 

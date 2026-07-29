@@ -21,7 +21,12 @@ import { buildReport, type ReportPeriod } from "@/lib/report";
 import { CATEGORIES } from "@/lib/categories";
 import { ReportSheet } from "@/components/report/ReportSheet";
 import { AccountSheet, type AuthMode } from "@/components/account/AccountSheet";
-import { signOut as signOutAccount } from "@/lib/ledger/account";
+import { GoogleMark } from "@/components/account/GoogleMark";
+import {
+  linkGoogleIdentity,
+  signOut as signOutAccount,
+  takeOAuthError,
+} from "@/lib/ledger/account";
 import { Button } from "@/components/ui/button";
 import {
   Sheet,
@@ -1009,6 +1014,7 @@ export default function ApsaraSpendPage() {
   const [showAccount,      setShowAccount]      = useState(false);
   const [accountMode,      setAccountMode]      = useState<AuthMode>("signup");
   const [signOutConfirm,   setSignOutConfirm]   = useState(false);
+  const [linkingGoogle,    setLinkingGoogle]    = useState(false);
   // GN2 — Compute modal mode once; update only on window resize (not every render)
   const pageModalMode = useMemo(() => {
     if (typeof window === "undefined") return "sheet" as const;
@@ -1089,6 +1095,15 @@ export default function ApsaraSpendPage() {
     setToast({ msg, type, undoFn });
     setTimeout(() => setToast(null), duration);
   }, []);
+
+  // AC2 — A rejected OAuth link fails during the callback, after this page has
+  // already unloaded and come back. The only trace is in the URL, so without
+  // reading it here the user lands on an unchanged screen with no idea the
+  // attempt failed. Reading it also strips it, so a reload can't replay it.
+  useEffect(() => {
+    const message = takeOAuthError();
+    if (message) showToast(message, "warn");
+  }, [showToast]);
 
   // Hydration, the debounced write and the API push all live in
   // useSyncedLedger() now. Only the user-facing messaging stays here.
@@ -1536,6 +1551,25 @@ export default function ApsaraSpendPage() {
 
   // Ends the session, then mints a fresh anonymous one so the app stays usable
   // and the next person on this device does not inherit the ledger.
+  // AC2 — Attach Google to the account already signed in on this device.
+  //
+  // Deliberately not routed through sign-out. Signing out to link would mint a
+  // fresh anonymous user first, and linking a Google account that already
+  // belongs to their real one then fails — leaving them anonymous, looking at
+  // an empty ledger, with their data stranded under the uid they just left.
+  // linkIdentity keeps the current uid, so the ledger is never in play.
+  const handleConnectGoogle = useCallback(async () => {
+    if (linkingGoogle) return;
+    setLinkingGoogle(true);
+
+    const result = await linkGoogleIdentity();
+    // Success navigates away; only a failure gets to run.
+    if (!result.ok) {
+      setLinkingGoogle(false);
+      showToast(result.message, "warn");
+    }
+  }, [linkingGoogle, showToast]);
+
   const handleSignOut = useCallback(async () => {
     setSignOutConfirm(false);
     setShowSettings(false);
@@ -3063,30 +3097,45 @@ export default function ApsaraSpendPage() {
                 those groups set by hand. */}
             <div className="mb-3 rounded-[14px] bg-background px-4 py-[13px]">
               {account && !account.isAnonymous ? (
-                <div className="flex items-center justify-between gap-3">
-                  <div className="min-w-0">
-                    <div className="truncate text-[13px] font-medium text-secondary-foreground">
-                      {account.email}
+                <>
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="min-w-0">
+                      <div className="truncate text-[13px] font-medium text-secondary-foreground">
+                        {account.email}
+                      </div>
+                      <div className="mt-0.5 flex items-center gap-1 text-[11px] text-muted-foreground">
+                        <Check size={11} strokeWidth={2.5} className="text-emerald-500" />
+                        Backed up — reachable from any device
+                      </div>
                     </div>
-                    <div className="mt-0.5 flex items-center gap-1 text-[11px] text-muted-foreground">
-                      <Check size={11} strokeWidth={2.5} className="text-emerald-500" />
-                      Backed up — reachable from any device
-                    </div>
+                    {!signOutConfirm ? (
+                      <button
+                        onClick={() => setSignOutConfirm(true)}
+                        className="shrink-0 cursor-pointer rounded-lg border border-border bg-secondary px-3 py-1.5 text-xs font-semibold whitespace-nowrap text-secondary-foreground">
+                        Sign out
+                      </button>
+                    ) : (
+                      <button
+                        onClick={() => void handleSignOut()}
+                        className="shrink-0 cursor-pointer rounded-lg border border-destructive/40 bg-destructive/10 px-3 py-1.5 text-xs font-semibold whitespace-nowrap text-destructive">
+                        Confirm
+                      </button>
+                    )}
                   </div>
-                  {!signOutConfirm ? (
+
+                  {/* Hidden once Google is attached — linkIdentity rejects a
+                      duplicate, and it only says so after a pointless trip to
+                      the consent screen. */}
+                  {!account.providers.includes("google") && (
                     <button
-                      onClick={() => setSignOutConfirm(true)}
-                      className="shrink-0 cursor-pointer rounded-lg border border-border bg-secondary px-3 py-1.5 text-xs font-semibold whitespace-nowrap text-secondary-foreground">
-                      Sign out
-                    </button>
-                  ) : (
-                    <button
-                      onClick={() => void handleSignOut()}
-                      className="shrink-0 cursor-pointer rounded-lg border border-destructive/40 bg-destructive/10 px-3 py-1.5 text-xs font-semibold whitespace-nowrap text-destructive">
-                      Confirm
+                      onClick={() => void handleConnectGoogle()}
+                      disabled={linkingGoogle}
+                      className="mt-3 flex w-full cursor-pointer items-center justify-center gap-2 rounded-lg border border-border bg-secondary px-3 py-2 text-xs font-semibold text-secondary-foreground disabled:pointer-events-none disabled:opacity-60">
+                      <GoogleMark className="size-4" />
+                      {linkingGoogle ? "Opening Google…" : "Also sign in with Google"}
                     </button>
                   )}
-                </div>
+                </>
               ) : (
                 <div className="flex items-center justify-between gap-3">
                   <div className="min-w-0">
