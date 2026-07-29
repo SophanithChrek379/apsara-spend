@@ -7,10 +7,12 @@ import { resetSessionCache } from "@/lib/ledger/session";
  * Two distinct flows, and the difference between them is the whole reason this
  * file exists:
  *
- *   SIGN UP ("Sync")  — the visitor already IS a Supabase user (anonymous), and
+ *   SIGN UP           — the visitor already IS a Supabase user (anonymous), and
  *                       owns rows. Attaching an email with updateUser() keeps
  *                       the SAME uid, so every transaction carries over with no
- *                       migration, no re-upload, nothing to reconcile.
+ *                       migration, no re-upload, nothing to reconcile. The
+ *                       label says "Sign up" but nothing is created; that word
+ *                       is for the user, who has no reason to care.
  *
  *   LOG IN            — a different identity replaces this device's anonymous
  *                       one. The uid CHANGES, which means the local cache
@@ -119,7 +121,7 @@ export const readAccount = async (): Promise<Account | null> => {
       email:        u.email ?? null,
       pendingEmail: (u.new_email as string | undefined) ?? null,
       // Supabase leaves is_anonymous true until the email is confirmed, which is
-      // exactly the semantics the UI wants: not backed up until verified.
+      // exactly the semantics the UI wants: not a real account until verified.
       isAnonymous:  u.is_anonymous === true,
       providers:    (u.identities ?? []).map((i) => i.provider),
     };

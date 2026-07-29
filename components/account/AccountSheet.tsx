@@ -72,7 +72,7 @@ interface AccountSheetProps {
   onOpenChange: (open: boolean) => void;
   /** Which flow to land on. The user can switch once inside. */
   initialMode: AuthMode;
-  /** Entry count, so signup can state exactly what is about to be backed up. */
+  /** Entry count, so sign-up can state exactly what is about to be saved. */
   entryCount: number;
   /**
    * Identity resolved. For "login" the caller MUST clear local data before
@@ -276,7 +276,7 @@ export function AccountSheet({
         <SheetTitle className="font-display text-[20px] leading-tight font-extrabold tracking-[-0.01em] text-foreground">
           {step === "code"
             ? "Enter your code"
-            : isSignup ? "Back up your data" : "Log in"}
+            : isSignup ? "Sign up" : "Log in"}
         </SheetTitle>
 
         <SheetDescription className="mt-1.5 text-[13px] leading-[1.6] text-muted-foreground">
@@ -354,7 +354,7 @@ export function AccountSheet({
             >
               {isSignup
                 ? "Already have an account? Log in"
-                : "New here? Back up this device instead"}
+                : "New here? Create an account"}
             </button>
           </form>
         ) : (

@@ -1542,7 +1542,7 @@ export default function ApsaraSpendPage() {
   ) => {
     if (mode === "signup") {
       await refreshAccount();
-      showToast(`Backed up to ${email}.`, "success");
+      showToast(`Signed up as ${email}.`, "success");
       return;
     }
     await adoptAccount(userId);
@@ -3040,7 +3040,7 @@ export default function ApsaraSpendPage() {
         {/* ── Settings ──
             A Radix sheet, like the report and the account sheet. It used to be a
             hand-rolled backdrop + motion.div pinned at `zIndex: 200`, which put
-            it *above* the account sheet Radix portals at z-50 — so "Back up"
+            it *above* the account sheet Radix portals at z-50 — so "Sign up"
             opened a sheet that painted behind this panel and could not be
             reached. Sharing one layer system is what makes that class of bug
             impossible, and it hands Radix the focus trap, the Escape key, the
@@ -3105,7 +3105,7 @@ export default function ApsaraSpendPage() {
                       </div>
                       <div className="mt-0.5 flex items-center gap-1 text-[11px] text-muted-foreground">
                         <Check size={11} strokeWidth={2.5} className="text-emerald-500" />
-                        Backed up — reachable from any device
+                        Signed in — reachable from any device
                       </div>
                     </div>
                     {!signOutConfirm ? (
@@ -3140,7 +3140,7 @@ export default function ApsaraSpendPage() {
                 <div className="flex items-center justify-between gap-3">
                   <div className="min-w-0">
                     <div className="text-[13px] font-medium text-secondary-foreground">
-                      {account?.pendingEmail ? "Finish backing up" : "Back up your data"}
+                      {account?.pendingEmail ? "Finish signing up" : "Create an account"}
                     </div>
                     <div className="mt-0.5 truncate text-[11px] text-muted-foreground/70">
                       {account?.pendingEmail
@@ -3154,7 +3154,7 @@ export default function ApsaraSpendPage() {
                     <button
                       onClick={() => { setAccountMode("signup"); setShowAccount(true); }}
                       className="cursor-pointer rounded-lg border border-primary/40 bg-primary/12 px-3 py-1.5 text-xs font-semibold whitespace-nowrap text-primary">
-                      Back up
+                      Sign up
                     </button>
                     <button
                       onClick={() => { setAccountMode("login"); setShowAccount(true); }}
