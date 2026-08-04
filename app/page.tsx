@@ -5,7 +5,7 @@ import { motion, AnimatePresence, PanInfo } from "framer-motion";
 import {
   Settings, ChevronLeft, ChevronRight, ChevronDown, X, Trash2, Plus,
   CalendarDays, Lightbulb, Lock, Check, AlertTriangle, Circle, Pencil,
-  Download, FileText, BarChart3, ListFilter,
+  Download, FileText, BarChart3, SlidersHorizontal,
   Cloud, CloudOff, UploadCloud, RefreshCw,
 } from "lucide-react";
 
@@ -29,6 +29,7 @@ import {
   signOut as signOutAccount,
   takeOAuthError,
 } from "@/lib/ledger/account";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   Sheet,
@@ -1839,6 +1840,32 @@ export default function ApsaraSpendPage() {
     [dateFilteredTxs, filterCategory]
   );
 
+  // True once the list on screen is a narrower slice than "the whole month" —
+  // the trigger for showing a total scoped to that slice below the filter bar.
+  // The month-wide hero total above never moves with these filters on purpose
+  // (a budget is a month concept); this is the number for what's visible now.
+  const isFiltering = filterCategory !== "all" || activeDateFilter !== null;
+
+  const filteredTotal = useMemo(() =>
+    pin2(filteredTxs.reduce((s, t) => s + t.amountUSD, 0)),
+    [filteredTxs]
+  );
+
+  const filteredCategoryTotals = useMemo(() =>
+    CATEGORIES.map((c) => {
+      const txs = filteredTxs.filter((t) => t.category === c.id);
+      return { ...c, total: pin2(txs.reduce((s, t) => s + t.amountUSD, 0)), count: txs.length };
+    })
+      .filter((c) => c.total > 0)
+      .sort((a, b) => b.total - a.total || a.label.localeCompare(b.label)),
+    [filteredTxs]
+  );
+
+  const filterSummaryLabel = [
+    activeDateFilter ? dateFilterLabel(activeDateFilter) : null,
+    activeCat?.label ?? null,
+  ].filter(Boolean).join(" · ");
+
   // Newest first; entries on the same day break ties by createdAt (most
   // recently added on top), falling back to id for stability if createdAt
   // ever ties too.
@@ -1890,13 +1917,19 @@ export default function ApsaraSpendPage() {
         <Button
           type="button"
           variant={activeDateFilter ? "default" : "outline"}
-          size="icon-sm"
+          size="sm"
           aria-label={activeDateFilter ? `Date filter: ${dateFilterLabel(activeDateFilter)}. Change filter.` : "Filter by date"}
           onClick={() => setShowDateFilter(true)}
-          className="shrink-0 rounded-full"
+          className="shrink-0 gap-1.5 rounded-full"
         >
-          <ListFilter strokeWidth={2} />
+          <SlidersHorizontal strokeWidth={2} />
+          Filter
         </Button>
+
+        <div
+          aria-hidden="true"
+          className="h-5 w-px shrink-0 bg-border"
+        />
 
         <div
           style={{ display: "flex", gap: 6, overflowX: "auto", paddingBottom: 2, scrollbarWidth: "none", WebkitOverflowScrolling: "touch", touchAction: "pan-x", minWidth: 0 }}
@@ -1952,6 +1985,49 @@ export default function ApsaraSpendPage() {
           })}
         </div>
       </div>
+
+      {/* ── Filtered total — only while the list is narrower than the whole
+           month. Mirrors the category-breakdown treatment in the summary card
+           above, but scoped to what's actually on screen right now; the month
+           hero total never moves with these filters since a budget is tracked
+           per month, not per filter. ── */}
+      {isFiltering && (
+        <motion.div
+          key={filterSummaryLabel}
+          initial={{ opacity: 0, y: -4 }} animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.18 }}
+          className="mb-4 rounded-[16px] border border-border bg-background px-4 py-3.5">
+          <div className="flex items-baseline justify-between gap-3">
+            <div className="min-w-0">
+              <div className="truncate text-xs font-semibold text-muted-foreground">
+                {filterSummaryLabel}
+              </div>
+              <div className="mt-0.5 text-[11px] text-muted-foreground/75">
+                {filteredTxs.length} {filteredTxs.length === 1 ? "entry" : "entries"}
+              </div>
+            </div>
+            <div className="shrink-0 font-numeric text-2xl font-extrabold tracking-[-0.02em] text-foreground">
+              {fmt(filteredTotal)}
+            </div>
+          </div>
+          {filteredCategoryTotals.length > 1 && (
+            <div className="mt-3 flex flex-wrap gap-1.5">
+              {filteredCategoryTotals.map((c) => (
+                <Badge
+                  key={c.id}
+                  variant="outline"
+                  className="gap-1.5 border-border/70 bg-card py-1 pr-2.5 pl-2 font-normal text-secondary-foreground">
+                  <span className="size-2 shrink-0 rounded-full" style={{ background: c.color }} />
+                  {c.label}
+                  <span className="font-numeric font-semibold" style={{ color: c.color }}>
+                    {fmt(c.total)}
+                  </span>
+                </Badge>
+              ))}
+            </div>
+          )}
+        </motion.div>
+      )}
 
       {/* ── Transaction rows (filtered) ── */}
       {visibleTxs.length === 0 ? (
