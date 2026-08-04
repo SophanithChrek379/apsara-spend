@@ -14,6 +14,12 @@ export interface Transaction {
   category: CategoryId;
   note: string;
   date: string; // ISO local-midnight
+  /**
+   * When the row was created, as a real instant (unlike `date`). Server-set,
+   * never sent by the client — absent on an optimistic row until the next
+   * sync pulls the server's copy back down.
+   */
+  createdAt?: string;
 }
 
 export interface AppData {
@@ -34,6 +40,7 @@ export interface TransactionRow {
   category: string;
   note: string;
   spent_on: string;  // "YYYY-MM-DD"
+  created_at: string;
   updated_at?: string;
 }
 

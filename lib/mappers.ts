@@ -24,6 +24,7 @@ export const rowToTransaction = (row: TransactionRow): Transaction => ({
   category:  row.category as CategoryId,
   note:      row.note,
   date:      fromSpentOn(row.spent_on),
+  createdAt: row.created_at,
 });
 
 /** Domain → DB payload. user_id is filled by the column default (auth.uid()). */

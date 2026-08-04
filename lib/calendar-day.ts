@@ -63,6 +63,24 @@ export const formatDisplayDate = (day: string): string => {
   return d.toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" });
 };
 
+/**
+ * Human-readable time-of-day for a `created_at` instant: "08:00AM", "02:39PM".
+ *
+ * Unlike the calendar-day helpers above, `created_at` genuinely is an instant
+ * (a `timestamptz`, not a `date`), so this reads it with *local* components on
+ * purpose — the viewer's device timezone is exactly what should decide what
+ * clock time it displays as.
+ */
+export const formatDisplayTime = (isoInstant: string): string => {
+  if (!isoInstant) return "";
+  const d = new Date(isoInstant);
+  if (Number.isNaN(d.getTime())) return "";
+  const hour24  = d.getHours();
+  const hour12  = hour24 % 12 || 12;
+  const period  = hour24 < 12 ? "AM" : "PM";
+  return `${pad(hour12)}:${pad(d.getMinutes())}${period}`;
+};
+
 /** Today as the user's device reckons it — the right default for a date picker. */
 export const todayDay = (d = new Date()): string =>
   `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;

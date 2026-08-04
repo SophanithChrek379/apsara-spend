@@ -18,7 +18,7 @@ import { assertMonthKey, assertUuid, assertBudgetUSD, ValidationError } from "@/
  * because it is half of the composite primary key.
  */
 
-const TX_COLUMNS = "id, amount_usd, category, note, spent_on, updated_at";
+const TX_COLUMNS = "id, amount_usd, category, note, spent_on, created_at, updated_at";
 
 /** Inclusive start / exclusive end bounds for a "YYYY-MM" key. */
 const monthBounds = (month: string) => {

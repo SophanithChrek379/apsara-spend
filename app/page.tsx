@@ -16,7 +16,7 @@ import {
 import type { Currency, CategoryId, Transaction, AppData } from "@/lib/types";
 import { useSyncedLedger, newTransactionId, type SyncStatus, type SyncResult } from "@/lib/ledger/useSyncedLedger";
 import { downloadBackupJson, downloadCsv } from "@/lib/ledger/export";
-import { isoFromDay, dayFromIso, monthKeyFromIso, todayDay, formatDisplayDate } from "@/lib/calendar-day";
+import { isoFromDay, dayFromIso, monthKeyFromIso, todayDay, formatDisplayDate, formatDisplayTime } from "@/lib/calendar-day";
 import { buildReport, type ReportPeriod } from "@/lib/report";
 import { CATEGORIES } from "@/lib/categories";
 import { ReportSheet } from "@/components/report/ReportSheet";
@@ -1989,6 +1989,7 @@ export default function ApsaraSpendPage() {
                       </div>
                       <div style={{ fontSize: 12, color: "var(--color-text-lo)", marginTop: 4, fontFamily: "var(--font-body)", lineHeight: 1.4 }}>
                         {cat.label} · {dateStr}
+                        {tx.createdAt && ` · ${formatDisplayTime(tx.createdAt)}`}
                       </div>
                     </div>
                     <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 3 }}>
