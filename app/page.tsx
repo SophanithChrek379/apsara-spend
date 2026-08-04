@@ -5,7 +5,7 @@ import { motion, AnimatePresence, PanInfo } from "framer-motion";
 import {
   Settings, ChevronLeft, ChevronRight, ChevronDown, X, Trash2, Plus,
   CalendarDays, Lightbulb, Lock, Check, AlertTriangle, Circle, Pencil,
-  Download, FileText, BarChart3,
+  Download, FileText, BarChart3, ListFilter,
   Cloud, CloudOff, UploadCloud, RefreshCw,
 } from "lucide-react";
 
@@ -17,9 +17,11 @@ import type { Currency, CategoryId, Transaction, AppData } from "@/lib/types";
 import { useSyncedLedger, newTransactionId, type SyncStatus, type SyncResult } from "@/lib/ledger/useSyncedLedger";
 import { downloadBackupJson, downloadCsv } from "@/lib/ledger/export";
 import { isoFromDay, dayFromIso, monthKeyFromIso, todayDay, formatDisplayDate, formatDisplayTime } from "@/lib/calendar-day";
+import { dateFilterRange, dateFilterLabel, dateFilterEmptyPhrase, type DateFilterValue } from "@/lib/date-filter";
 import { buildReport, type ReportPeriod } from "@/lib/report";
 import { CATEGORIES } from "@/lib/categories";
 import { ReportSheet } from "@/components/report/ReportSheet";
+import { DateFilterSheet } from "@/components/transactions/DateFilterSheet";
 import { AccountSheet, type AuthMode } from "@/components/account/AccountSheet";
 import { GoogleMark } from "@/components/account/GoogleMark";
 import {
@@ -1050,7 +1052,12 @@ export default function ApsaraSpendPage() {
   const [catFilter,        setCatFilter]        = useState<{ month: string; cat: CategoryId | "all" }>(
     () => ({ month: todayMonthKey(), cat: "all" })
   );
-  const [showFilterMenu,   setShowFilterMenu]   = useState(false);
+  // Date-range filter (Today / This week / Custom) — same month-paired shape
+  // as `catFilter` above, and reset alongside it: see the effect below.
+  const [dateFilterState,  setDateFilterState]  = useState<{ month: string; filter: DateFilterValue | null }>(
+    () => ({ month: todayMonthKey(), filter: null })
+  );
+  const [showDateFilter,   setShowDateFilter]   = useState(false);
   // L — Swipe-to-delete: openSwipeId tracks which row is snapped open.
   // confirmDeleteTx holds the transaction pending confirmation.
   const [openSwipeId,      setOpenSwipeId]      = useState<string | null>(null);
@@ -1300,6 +1307,30 @@ export default function ApsaraSpendPage() {
     [selectedMonth]
   );
 
+  // Same derived-not-stored shape as `filterCategory` above, for the same
+  // reason: a date range picked in July shouldn't silently keep narrowing
+  // August once the swipe carries you there.
+  const activeDateFilter: DateFilterValue | null =
+    dateFilterState.month === selectedMonth ? dateFilterState.filter : null;
+
+  const setDateFilter = useCallback(
+    (filter: DateFilterValue | null) => setDateFilterState({ month: selectedMonth, filter }),
+    [selectedMonth]
+  );
+
+  // Date filter narrows within the month already on screen — Today/This week
+  // resolve against the real calendar, so if today or this week falls outside
+  // the selected month the list is correctly empty rather than reaching into
+  // another month to fill itself.
+  const dateFilteredTxs = useMemo(() => {
+    if (!activeDateFilter) return monthTxs;
+    const { from, to } = dateFilterRange(activeDateFilter);
+    return monthTxs.filter((t) => {
+      const day = dayFromIso(t.date);
+      return day >= from && day <= to;
+    });
+  }, [monthTxs, activeDateFilter]);
+
   const totalUSD = useMemo(() =>
     pin2(monthTxs.reduce((s, t) => s + t.amountUSD, 0)),
     [monthTxs]
@@ -1448,7 +1479,7 @@ export default function ApsaraSpendPage() {
   }, [openSwipeId]);
 
   // Reset visible count when month or filter changes so we always start at top
-  useEffect(() => { setVisibleCount(10); }, [selectedMonth, filterCategory]);
+  useEffect(() => { setVisibleCount(10); }, [selectedMonth, filterCategory, activeDateFilter]);
 
   // Clear the stored filter once the month has actually changed, so coming back
   // to July later opens on All rather than resurrecting the filter that was on
@@ -1456,6 +1487,7 @@ export default function ApsaraSpendPage() {
   // frame; this only stops the stale value lingering in state behind it.
   useEffect(() => {
     setCatFilter((f) => (f.month === selectedMonth ? f : { month: selectedMonth, cat: "all" }));
+    setDateFilterState((f) => (f.month === selectedMonth ? f : { month: selectedMonth, filter: null }));
   }, [selectedMonth]);
 
   // ── Navigation ───────────────────────────────────────────────────────────────
@@ -1471,7 +1503,7 @@ export default function ApsaraSpendPage() {
     // No filter reset here — `filterCategory` is derived from selectedMonth, so
     // the new month is unfiltered the moment this lands. Resetting the stored
     // value as well would only re-stamp it with the month we are leaving.
-    setShowFilterMenu(false);
+    setShowDateFilter(false);
   };
 
   const handleDragEnd = (_e: MouseEvent | TouchEvent | PointerEvent, info: PanInfo) => {
@@ -1802,16 +1834,19 @@ export default function ApsaraSpendPage() {
   const activeCat   = CATEGORIES.find((c) => c.id === filterCategory);
   const filteredTxs = useMemo(() =>
     filterCategory === "all"
-      ? monthTxs
-      : monthTxs.filter((t) => t.category === filterCategory),
-    [monthTxs, filterCategory]
+      ? dateFilteredTxs
+      : dateFilteredTxs.filter((t) => t.category === filterCategory),
+    [dateFilteredTxs, filterCategory]
   );
 
-  // Newest first, id as the tiebreak so two entries on the same day hold a
-  // stable order across renders instead of shuffling on every re-sort.
+  // Newest first; entries on the same day break ties by createdAt (most
+  // recently added on top), falling back to id for stability if createdAt
+  // ever ties too.
   const sortedTxs = useMemo(() =>
     [...filteredTxs].sort((a, b) =>
       new Date(b.date).getTime() - new Date(a.date).getTime() ||
+      (b.createdAt ? new Date(b.createdAt).getTime() : 0) -
+        (a.createdAt ? new Date(a.createdAt).getTime() : 0) ||
       b.id.localeCompare(a.id)
     ),
     [filteredTxs]
@@ -1842,56 +1877,92 @@ export default function ApsaraSpendPage() {
   const TransactionList = hasData ? (
     <div style={{ background: "var(--color-bg-card)", borderRadius: 22, padding: "20px 20px 24px", border: "1px solid var(--color-border)", display: "flex", flexDirection: "column" }}>
 
-      {/* ── Filter chips — horizontal scroll. onPointerDownCapture stops propagation
-           to the parent motion.div drag handler so scrolling chips doesn't trigger
-           month navigation — both gestures coexist independently ── */}
+      {/* ── Filter bar — a pinned date-filter trigger plus the horizontally
+           scrolling category chips. onPointerDownCapture stops propagation to
+           the parent motion.div drag handler so this row's own gestures (chip
+           scroll, button taps) don't trigger month navigation — both coexist
+           independently ── */}
       <div
-        style={{ display: "flex", gap: 6, marginBottom: 16, overflowX: "auto", paddingBottom: 2, scrollbarWidth: "none", WebkitOverflowScrolling: "touch", touchAction: "pan-x" }}
+        style={{ display: "flex", gap: 8, marginBottom: 16, alignItems: "center" }}
         onPointerDownCapture={(e) => e.stopPropagation()}
         onTouchStartCapture={(e) => e.stopPropagation()}
       >
-        {/* All chip */}
-        <button
-          onClick={() => setFilterCategory("all")}
-          style={{
-            flexShrink: 0, display: "flex", alignItems: "center", gap: 5,
-            padding: "5px 12px", borderRadius: 99,
-            border: filterCategory === "all" ? "none" : "1px solid var(--color-border-mid)",
-            background: filterCategory === "all" ? "var(--accent)" : "var(--color-bg-nav)",
-            color: filterCategory === "all" ? "var(--accent-text)" : "var(--color-text-lo)",
-            fontSize: 12, fontWeight: 600, fontFamily: "var(--font-body)",
-            cursor: "pointer", transition: "all 0.15s",
-            whiteSpace: "nowrap",
-          }}>
-          All
-        </button>
-        {/* Category chips — only for categories with entries */}
-        {CATEGORIES.filter(c => monthTxs.some(t => t.category === c.id)).map(c => {
-          const active = filterCategory === c.id;
-          return (
-            <button key={c.id}
-              onClick={() => setFilterCategory(active ? "all" : c.id)}
-              style={{
-                flexShrink: 0, display: "flex", alignItems: "center", gap: 5,
-                padding: "5px 10px", borderRadius: 99,
-                border: active ? "none" : "1px solid var(--color-border-mid)",
-                background: active ? c.color : "var(--color-bg-nav)",
-                color: active ? "#fff" : "var(--color-text-lo)",
-                fontSize: 12, fontWeight: active ? 600 : 400, fontFamily: "var(--font-body)",
-                cursor: "pointer", transition: "all 0.15s",
-                whiteSpace: "nowrap",
-              }}>
-              <c.Icon size={11} color={active ? "#fff" : c.color} strokeWidth={2} />
-              {c.label}
-            </button>
-          );
-        })}
+        <Button
+          type="button"
+          variant={activeDateFilter ? "default" : "outline"}
+          size="icon-sm"
+          aria-label={activeDateFilter ? `Date filter: ${dateFilterLabel(activeDateFilter)}. Change filter.` : "Filter by date"}
+          onClick={() => setShowDateFilter(true)}
+          className="shrink-0 rounded-full"
+        >
+          <ListFilter strokeWidth={2} />
+        </Button>
+
+        <div
+          style={{ display: "flex", gap: 6, overflowX: "auto", paddingBottom: 2, scrollbarWidth: "none", WebkitOverflowScrolling: "touch", touchAction: "pan-x", minWidth: 0 }}
+        >
+          {/* Active date-range chip — only shown once a filter is applied */}
+          {activeDateFilter && (
+            <Button
+              type="button"
+              variant="secondary"
+              size="sm"
+              onClick={() => setDateFilter(null)}
+              aria-label={`Clear date filter: ${dateFilterLabel(activeDateFilter)}`}
+              className="shrink-0 gap-1.5 rounded-full whitespace-nowrap">
+              {dateFilterLabel(activeDateFilter)}
+              <X size={12} strokeWidth={2.5} />
+            </Button>
+          )}
+          {/* All chip */}
+          <button
+            onClick={() => setFilterCategory("all")}
+            style={{
+              flexShrink: 0, display: "flex", alignItems: "center", gap: 5,
+              padding: "5px 12px", borderRadius: 99,
+              border: filterCategory === "all" ? "none" : "1px solid var(--color-border-mid)",
+              background: filterCategory === "all" ? "var(--accent)" : "var(--color-bg-nav)",
+              color: filterCategory === "all" ? "var(--accent-text)" : "var(--color-text-lo)",
+              fontSize: 12, fontWeight: 600, fontFamily: "var(--font-body)",
+              cursor: "pointer", transition: "all 0.15s",
+              whiteSpace: "nowrap",
+            }}>
+            All
+          </button>
+          {/* Category chips — only for categories with entries */}
+          {CATEGORIES.filter(c => monthTxs.some(t => t.category === c.id)).map(c => {
+            const active = filterCategory === c.id;
+            return (
+              <button key={c.id}
+                onClick={() => setFilterCategory(active ? "all" : c.id)}
+                style={{
+                  flexShrink: 0, display: "flex", alignItems: "center", gap: 5,
+                  padding: "5px 10px", borderRadius: 99,
+                  border: active ? "none" : "1px solid var(--color-border-mid)",
+                  background: active ? c.color : "var(--color-bg-nav)",
+                  color: active ? "#fff" : "var(--color-text-lo)",
+                  fontSize: 12, fontWeight: active ? 600 : 400, fontFamily: "var(--font-body)",
+                  cursor: "pointer", transition: "all 0.15s",
+                  whiteSpace: "nowrap",
+                }}>
+                <c.Icon size={11} color={active ? "#fff" : c.color} strokeWidth={2} />
+                {c.label}
+              </button>
+            );
+          })}
+        </div>
       </div>
 
       {/* ── Transaction rows (filtered) ── */}
       {visibleTxs.length === 0 ? (
         <div style={{ textAlign: "center", padding: "24px 0", color: "var(--color-text-lo)", fontSize: 13, fontFamily: "var(--font-body)" }}>
-          {activeCat ? `No ${activeCat.label} entries this month` : "No entries this month"}
+          {activeCat && activeDateFilter
+            ? `No ${activeCat.label} entries ${dateFilterEmptyPhrase(activeDateFilter)}`
+            : activeCat
+            ? `No ${activeCat.label} entries this month`
+            : activeDateFilter
+            ? `No entries ${dateFilterEmptyPhrase(activeDateFilter)}`
+            : "No entries this month"}
         </div>
       ) : (() => {
         const visible = visibleTxs;
@@ -2884,7 +2955,7 @@ export default function ApsaraSpendPage() {
                 setSwipeDir(ny > cy || (ny === cy && nm > cm) ? 1 : -1);
                 setSelectedMonth(k);
                 // Filter resets itself — see the `filterCategory` derivation.
-                setShowFilterMenu(false);
+                setShowDateFilter(false);
               }}
               onClose={() => setShowPicker(false)}
             />
@@ -3020,6 +3091,18 @@ export default function ApsaraSpendPage() {
           currency={currency}
           onPickCategory={handleReportCategory}
           onClose={() => setShowReport(false)}
+        />
+
+        {/* ── Date filter ──
+            Same reasoning as ReportSheet above: a Radix sheet with its own
+            mount/unmount transition. */}
+        <DateFilterSheet
+          open={showDateFilter}
+          monthKey={selectedMonth}
+          monthLabel={`${MONTH_FULL[month - 1]} ${year}`}
+          value={activeDateFilter}
+          onApply={setDateFilter}
+          onClose={() => setShowDateFilter(false)}
         />
 
         {/* ── Account: Google ──

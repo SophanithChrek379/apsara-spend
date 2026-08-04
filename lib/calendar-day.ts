@@ -85,6 +85,23 @@ export const formatDisplayTime = (isoInstant: string): string => {
 export const todayDay = (d = new Date()): string =>
   `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 
+/** "YYYY-MM-DD" bounds of the Sunday-start calendar week containing `day`. */
+export const weekRangeContaining = (day: string): { start: string; end: string } => {
+  const d = new Date(`${day}T12:00:00`);
+  const start = new Date(d);
+  start.setDate(d.getDate() - d.getDay());
+  const end = new Date(start);
+  end.setDate(start.getDate() + 6);
+  return { start: todayDay(start), end: todayDay(end) };
+};
+
+/** "YYYY-MM-DD" bounds of the first and last day of a "YYYY-MM" month key. */
+export const monthDayBounds = (monthKey: string): { first: string; last: string } => {
+  const [y, m] = monthKey.split("-").map(Number);
+  const lastDate = new Date(y, m, 0).getDate(); // day 0 of next month = last day of this one
+  return { first: `${monthKey}-01`, last: `${monthKey}-${pad(lastDate)}` };
+};
+
 /**
  * Migrates a legacy local-midnight date to the canonical form.
  *
