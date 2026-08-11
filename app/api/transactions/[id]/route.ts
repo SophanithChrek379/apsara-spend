@@ -6,6 +6,7 @@ import {
   assertAmountUSD,
   assertCategory,
   assertLocalDate,
+  assertTimeOfDay,
   sanitizeNote,
   ValidationError,
 } from "@/lib/validation";
@@ -25,7 +26,7 @@ export const GET = route<Ctx>(async (_req, { params }) => {
 
 /**
  * PATCH /api/transactions/:id
- * Body: any subset of { amountUSD, category, note, date }
+ * Body: any subset of { amountUSD, category, note, date, time }
  */
 export const PATCH = route<Ctx>(async (req, { params }) => {
   const { supabase } = await requireUser();
@@ -48,6 +49,7 @@ export const PATCH = route<Ctx>(async (req, { params }) => {
       : toSpentOn(b.date);
     if (!patch.spent_on) throw new ValidationError("date is not a valid date");
   }
+  if (b.time !== undefined) patch.spent_at_time = assertTimeOfDay(b.time) ?? null;
 
   if (Object.keys(patch).length === 0) {
     throw new ValidationError("No updatable fields provided");

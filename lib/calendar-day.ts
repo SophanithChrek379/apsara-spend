@@ -85,6 +85,26 @@ export const formatDisplayTime = (isoInstant: string): string => {
 export const todayDay = (d = new Date()): string =>
   `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 
+/** Now as "HH:MM" (24h) — the right default for a time picker. */
+export const nowTimeOfDay = (d = new Date()): string =>
+  `${pad(d.getHours())}:${pad(d.getMinutes())}`;
+
+/**
+ * Human-readable wall-clock time: "14:05" → "02:05PM".
+ *
+ * Unlike `formatDisplayTime`, the input here is not an instant — it is the
+ * literal HH:MM the user picked, with no timezone attached, so it is
+ * formatted as-is rather than read through a `Date`.
+ */
+export const formatTimeOfDay = (time: string): string => {
+  if (!time) return "";
+  const [h, m] = time.split(":").map(Number);
+  if (!Number.isFinite(h) || !Number.isFinite(m)) return "";
+  const hour12 = h % 12 || 12;
+  const period = h < 12 ? "AM" : "PM";
+  return `${pad(hour12)}:${pad(m)}${period}`;
+};
+
 /**
  * Migrates a legacy local-midnight date to the canonical form.
  *

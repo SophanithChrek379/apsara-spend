@@ -4,7 +4,7 @@ import React, { useState, useEffect, useCallback, useRef, useMemo } from "react"
 import { motion, AnimatePresence, PanInfo } from "framer-motion";
 import {
   Settings, ChevronLeft, ChevronRight, ChevronDown, X, Trash2, Plus,
-  CalendarDays, Lightbulb, Lock, Check, AlertTriangle, Circle, Pencil,
+  CalendarDays, Clock, Lightbulb, Lock, Check, AlertTriangle, Circle, Pencil,
   Download, FileText, BarChart3,
   Cloud, CloudOff, UploadCloud, RefreshCw,
 } from "lucide-react";
@@ -16,10 +16,11 @@ import {
 import type { Currency, CategoryId, Transaction, AppData } from "@/lib/types";
 import { useSyncedLedger, newTransactionId, type SyncStatus, type SyncResult } from "@/lib/ledger/useSyncedLedger";
 import { downloadBackupJson, downloadCsv } from "@/lib/ledger/export";
-import { isoFromDay, dayFromIso, monthKeyFromIso, todayDay, formatDisplayDate, formatDisplayTime } from "@/lib/calendar-day";
+import { isoFromDay, dayFromIso, monthKeyFromIso, todayDay, nowTimeOfDay, formatDisplayDate, formatDisplayTime, formatTimeOfDay } from "@/lib/calendar-day";
 import { buildReport, type ReportPeriod } from "@/lib/report";
 import { CATEGORIES } from "@/lib/categories";
 import { ReportSheet } from "@/components/report/ReportSheet";
+import { OverlayPickerField } from "@/components/transactions/OverlayPickerField";
 import { AccountSheet, type AuthMode } from "@/components/account/AccountSheet";
 import { GoogleMark } from "@/components/account/GoogleMark";
 import {
@@ -417,13 +418,12 @@ function EntryModal({ tx, selectedMonth, monthBalance, totalUSD: currentTotal, c
   const [cat,           setCat]           = useState<CategoryId>(tx?.category ?? "food");
   const [note,          setNote]          = useState(tx?.note ?? "");
   const [date,          setDate]          = useState(defaultDate);
+  const [time,          setTime]          = useState(tx ? (tx.time ?? "") : nowTimeOfDay());
   const [shake,         setShake]         = useState(false);
   const [amtFocused,    setAmtFocused]    = useState(false);
-  const [dateFocused,   setDateFocused]   = useState(false);
   // § 2  KHR denomination hint state — shown when amount is not a multiple of KHR_STEP
   const [khrHint,       setKhrHint]       = useState(false);
   const amountRef    = useRef<HTMLInputElement>(null);
-  const dateInputRef = useRef<HTMLInputElement>(null);
   const modalRef     = useRef<HTMLDivElement>(null);
 
   // Cursor-to-end on manual focus (edit mode — pre-filled value)
@@ -497,6 +497,7 @@ function EntryModal({ tx, selectedMonth, monthBalance, totalUSD: currentTotal, c
       category:  cat,
       note:      sanitizeText(note) || catLabel,
       date:      isoFromDay(date),
+      time:      time || undefined,
     });
     onClose();
   };
@@ -690,79 +691,28 @@ function EntryModal({ tx, selectedMonth, monthBalance, totalUSD: currentTotal, c
           style={{ width: "100%", boxSizing: "border-box", padding: "14px 16px", fontSize: 16, fontFamily: "var(--font-body)", lineHeight: 1.5, marginBottom: 16 }}
         />
 
-        {/* ── Date picker — article technique: full-area transparent overlay ──
-            Source: dev.to/codeclown/styling-a-native-date-input…
-            Key rules from the article:
-            1. NO overflow:hidden on wrapper (clips tap area on iOS)
-            2. opacity: 0.01 not 0  (iOS ignores truly invisible elements)
-            3. input is LAST child so it stacks on top naturally (z-index:1)
-            4. No showPicker() / button click — taps go directly to the input
-            5. Display div has pointerEvents:none so taps pass through
-            ─────────────────────────────────────────────────────────────── */}
-        <div style={{ position: "relative", marginBottom: 16, display: "block" }}>
-
-          {/* ── Display layer (behind, pointer-events:none) ── */}
-          <div
-            className="input-field"
-            style={{
-              display: "flex", alignItems: "center",
-              borderRadius: 12,
-              padding: "14px 16px",
-              minHeight: 48,
-              pointerEvents: "none",
-              userSelect: "none",
-              transition: "border 0.18s, box-shadow 0.18s",
-              ...(dateFocused ? {
-                border: "1.5px solid var(--accent)",
-                boxShadow: "0 0 0 3px var(--accent-muted)",
-              } : {
-                border: "1.5px solid var(--color-border)",
-              }),
-            }}
-          >
-            <span style={{
-              fontSize: 16,
-              fontFamily: "var(--font-body)",
-              lineHeight: 1,
-              color: "var(--color-text-hi)",
-            }}>
-              {date ? formatDisplayDate(date) : "Select date"}
-            </span>
-            <CalendarDays
-              size={16}
-              color="var(--color-text-lo)"
-              strokeWidth={1.8}
-              style={{ marginLeft: "auto", flexShrink: 0 }}
-            />
-          </div>
-
-          {/* ── Native input overlay (on top, full parent coverage) ──
-              inset:0 + width:100% + height:100% — anchors to all four edges
-              of the position:relative wrapper, covering the entire display
-              div so any tap anywhere inside the block opens the date picker.
-              opacity:0.01 — visually invisible, iOS still treats as interactive
-              z-index:1 — topmost tap target in the stacking context
-              minHeight:48px — prevents collapse if wrapper has no height yet  */}
-          <input
-            ref={dateInputRef}
+        {/* Date + time pickers — native inputs styled via a shared overlay
+            component; see components/transactions/OverlayPickerField.tsx for
+            the technique and its rules (dev.to/codeclown/styling-a-native-date-input). */}
+        <div className="mb-4 grid grid-cols-2 gap-3">
+          <OverlayPickerField
             type="date"
             value={date}
+            onChange={setDate}
+            display={formatDisplayDate(date)}
+            placeholder="Select date"
+            icon={CalendarDays}
             max={localDateString()}
-            onChange={(e) => setDate(e.target.value)}
-            onFocus={() => setDateFocused(true)}
-            onBlur={() => setDateFocused(false)}
-            style={{
-              position: "absolute",
-              inset: 0,
-              width: "100%",
-              height: "100%",
-              minHeight: 48,
-              opacity: 0.01,
-              zIndex: 1,
-              cursor: "pointer",
-              colorScheme: "dark",
-              boxSizing: "border-box",
-            }}
+            aria-label="Date"
+          />
+          <OverlayPickerField
+            type="time"
+            value={time}
+            onChange={setTime}
+            display={formatTimeOfDay(time)}
+            placeholder="Select time"
+            icon={Clock}
+            aria-label="Time"
           />
         </div>
 
@@ -1989,7 +1939,9 @@ export default function ApsaraSpendPage() {
                       </div>
                       <div style={{ fontSize: 12, color: "var(--color-text-lo)", marginTop: 4, fontFamily: "var(--font-body)", lineHeight: 1.4 }}>
                         {cat.label} · {dateStr}
-                        {tx.createdAt && ` · ${formatDisplayTime(tx.createdAt)}`}
+                        {tx.time
+                          ? ` · ${formatTimeOfDay(tx.time)}`
+                          : tx.createdAt && ` · ${formatDisplayTime(tx.createdAt)}`}
                       </div>
                     </div>
                     <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 3 }}>

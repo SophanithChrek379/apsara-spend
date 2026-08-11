@@ -14,6 +14,8 @@ export interface Transaction {
   category: CategoryId;
   note: string;
   date: string; // ISO local-midnight
+  /** Wall-clock time of day, "HH:MM" (24h). Optional — not every expense has one. */
+  time?: string;
   /**
    * When the row was created, as a real instant (unlike `date`). Server-set,
    * never sent by the client — absent on an optimistic row until the next
@@ -40,6 +42,7 @@ export interface TransactionRow {
   category: string;
   note: string;
   spent_on: string;  // "YYYY-MM-DD"
+  spent_at_time: string | null; // "HH:MM:SS", as Postgres returns a TIME
   created_at: string;
   updated_at?: string;
 }

@@ -70,6 +70,15 @@ export const assertLocalDate = (v: unknown): string => {
   return s;
 };
 
+/** "HH:MM", 24-hour. Optional — absent/empty means no time was picked. */
+export const assertTimeOfDay = (v: unknown): string | undefined => {
+  if (v === undefined || v === null || v === "") return undefined;
+  if (typeof v !== "string" || !/^([01]\d|2[0-3]):[0-5]\d$/.test(v)) {
+    fail("time must be formatted HH:MM (24-hour)");
+  }
+  return v as string;
+};
+
 /**
  * Validates an incoming transaction. `date` is accepted either as a local
  * calendar day ("YYYY-MM-DD") or as the ISO timestamp the existing client
@@ -107,6 +116,7 @@ export const parseTransactionInput = (
       category,
       note:      sanitizeNote(b.note) || category,
       date:      isoFromDay(spentOn),
+      time:      assertTimeOfDay(b.time),
     },
     spentOn,
   };

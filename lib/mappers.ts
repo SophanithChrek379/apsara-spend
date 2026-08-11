@@ -24,16 +24,19 @@ export const rowToTransaction = (row: TransactionRow): Transaction => ({
   category:  row.category as CategoryId,
   note:      row.note,
   date:      fromSpentOn(row.spent_on),
+  // Postgres returns TIME as "HH:MM:SS" — trim to the "HH:MM" the UI works with.
+  time:      row.spent_at_time ? row.spent_at_time.slice(0, 5) : undefined,
   createdAt: row.created_at,
 });
 
 /** Domain → DB payload. user_id is filled by the column default (auth.uid()). */
 export const transactionToRow = (tx: Transaction) => ({
-  id:         tx.id,
-  amount_usd: tx.amountUSD,
-  category:   tx.category,
-  note:       tx.note,
-  spent_on:   toSpentOn(tx.date),
+  id:            tx.id,
+  amount_usd:    tx.amountUSD,
+  category:      tx.category,
+  note:          tx.note,
+  spent_on:      toSpentOn(tx.date),
+  spent_at_time: tx.time ?? null,
 });
 
 export const rowsToMonthlyBalances = (

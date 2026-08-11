@@ -8,7 +8,8 @@ const sameTx = (a: Transaction, b: Transaction) =>
   a.amountUSD === b.amountUSD &&
   a.category  === b.category  &&
   a.note      === b.note      &&
-  a.date      === b.date;
+  a.date      === b.date      &&
+  a.time      === b.time;
 
 /**
  * Pending write set = whatever makes `snapshot` look like `current`.
