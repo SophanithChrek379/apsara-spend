@@ -1757,13 +1757,22 @@ export default function ApsaraSpendPage() {
     [monthTxs, filterCategory]
   );
 
-  // Newest first, id as the tiebreak so two entries on the same day hold a
-  // stable order across renders instead of shuffling on every re-sort.
-  const sortedTxs = useMemo(() =>
-    [...filteredTxs].sort((a, b) =>
+  // Newest first. Same-day entries tie-break on createdAt (when the row has
+  // synced and carries a real server instant) so the most recently *added*
+  // entry sits on top, matching how the list reads to the user — not on id,
+  // whose UUID ordering has no relation to when the row was written.
+  // An optimistic row has no createdAt yet; it just came from this device, so
+  // it's treated as "now" and floats to the top rather than sinking to the
+  // bottom of its day until the next sync fills the field in.
+  const sortedTxs = useMemo(() => {
+    const now = new Date().toISOString();
+    const createdKey = (t: Transaction) => t.createdAt ?? now;
+    return [...filteredTxs].sort((a, b) =>
       new Date(b.date).getTime() - new Date(a.date).getTime() ||
+      createdKey(b).localeCompare(createdKey(a)) ||
       b.id.localeCompare(a.id)
-    ),
+    );
+  },
     [filteredTxs]
   );
 
