@@ -36,13 +36,56 @@ import {
   SheetDescription,
   SheetTitle,
 } from "@/components/ui/sheet";
+import { cva } from "class-variance-authority";
 import { cn } from "@/lib/utils";
 
 interface Toast {
   msg: string;
   type: "warn" | "info" | "success";
-  undoFn?: () => void; // optional undo callback shown as pill in toast
+  /**
+   * Optional inline action. The label is carried with it because not every
+   * action undoes something — a failed sync offers "Retry", and labelling that
+   * "Undo" told the user the button did the opposite of what it does.
+   */
+  action?: { label: string; run: () => void };
 }
+
+/**
+ * Toast tones. The colours are the --toast-* tokens the page already defines
+ * for both themes; only their arrangement lives here.
+ */
+const toastSurface = cva("", {
+  variants: {
+    tone: {
+      warn:    "bg-[var(--toast-warn-bg)] border-[var(--toast-warn-border)]",
+      success: "bg-[var(--toast-ok-bg)] border-[var(--toast-ok-border)]",
+      info:    "bg-[var(--toast-info-bg)] border-[var(--toast-info-border)]",
+    },
+  },
+  defaultVariants: { tone: "info" },
+});
+
+const toastText = cva("", {
+  variants: {
+    tone: {
+      warn:    "text-[var(--toast-warn-text)]",
+      success: "text-[var(--toast-ok-text)]",
+      info:    "text-[var(--toast-info-text)]",
+    },
+  },
+  defaultVariants: { tone: "info" },
+});
+
+const toastAction = cva("", {
+  variants: {
+    tone: {
+      warn:    "bg-[var(--toast-warn-border)] hover:bg-[var(--toast-warn-border)]/90",
+      success: "bg-[var(--toast-ok-border)] hover:bg-[var(--toast-ok-border)]/90",
+      info:    "bg-[var(--toast-info-border)] hover:bg-[var(--toast-info-border)]/90",
+    },
+  },
+  defaultVariants: { tone: "info" },
+});
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -860,6 +903,24 @@ function EntryModal({ tx, selectedMonth, monthBalance, totalUSD: currentTotal, c
   );
 }
 
+/**
+ * Pill tones. `--accent` and friends already track the theme switcher, and
+ * `destructive` is the shadcn token for the same red the pill used to hard-code.
+ */
+const syncPill = cva(
+  "h-7 min-h-7 gap-1 rounded-full border px-2.5 py-[5px] font-sans text-[10px] font-semibold tracking-[0.04em] transition-[opacity,background-color] duration-200",
+  {
+    variants: {
+      tone: {
+        quiet:  "border-transparent bg-transparent text-[var(--color-text-lo)] hover:bg-[var(--color-bg-deep)] hover:text-[var(--color-text-lo)]",
+        active: "border-[var(--accent-border)] bg-[var(--accent-muted)] text-[var(--accent)] hover:bg-[var(--accent-muted)] hover:text-[var(--accent)]",
+        alarm:  "border-destructive/25 bg-destructive/10 text-destructive hover:bg-destructive/15 hover:text-destructive",
+      },
+    },
+    defaultVariants: { tone: "quiet" },
+  },
+);
+
 // ─── Sync status pill ─────────────────────────────────────────────────────────
 /**
  * The only visible surface for a sync layer that is otherwise entirely silent.
@@ -885,56 +946,49 @@ function SyncPill({ status, pendingCount, onSync }: {
     try { await onSync(); } finally { setBusy(false); }
   };
 
+  // Three tones, and which state gets which is the whole message this pill
+  // carries. Only "alarm" means something went wrong; queued work and a
+  // sessionless device are ordinary states of a local-first app, not faults.
   const view =
     busy || status === "loading"
-      ? { Icon: RefreshCw,  label: "Syncing…",   color: "var(--color-text-lo)", bg: "transparent",         border: "transparent",     spin: true }
+      ? { Icon: RefreshCw,     label: "Syncing…", tone: "quiet"  as const, spin: true }
     : status === "pending"
-      ? { Icon: UploadCloud, label: pendingCount > 0 ? `${pendingCount} to sync` : "Pending",
-                                                 color: "var(--accent)",        bg: "var(--accent-muted)", border: "var(--accent-border)", spin: false }
+      ? { Icon: UploadCloud,   label: pendingCount > 0 ? `${pendingCount} to sync` : "Pending",
+                                                  tone: "active" as const, spin: false }
     : status === "offline"
-      ? { Icon: CloudOff,   label: "Offline",    color: "var(--color-text-lo)", bg: "transparent",         border: "transparent",     spin: false }
+      ? { Icon: CloudOff,      label: "Offline",  tone: "quiet"  as const, spin: false }
+    : status === "local"
+      // Not red: nothing was lost and nothing is broken. The data is on this
+      // device and goes up as soon as there is a session to file it under.
+      ? { Icon: CloudOff,      label: "This device only", tone: "active" as const, spin: false }
     : status === "error"
-      ? { Icon: AlertTriangle, label: "Sync failed", color: "#ef4444",          bg: "#ef444418",           border: "#ef444440",       spin: false }
-      : { Icon: Cloud,      label: "Synced",     color: "var(--color-text-lo)", bg: "transparent",         border: "transparent",     spin: false };
+      ? { Icon: AlertTriangle, label: "Sync failed", tone: "alarm" as const, spin: false }
+      : { Icon: Cloud,         label: "Synced",   tone: "quiet"  as const, spin: false };
 
   const { Icon } = view;
 
   return (
-    <button
+    <Button
+      variant="ghost"
+      size="sm"
       onClick={run}
       disabled={busy}
       aria-label={`Sync status: ${view.label}. Tap to sync now.`}
       aria-live="polite"
-      style={{
-        display: "inline-flex", alignItems: "center", gap: 4,
-        background: view.bg,
-        border: `1px solid ${view.border}`,
-        color: view.color,
-        borderRadius: 99,
-        padding: "5px 9px",
-        minHeight: 28,
-        fontSize: 10,
-        fontWeight: 600,
-        letterSpacing: "0.04em",
-        fontFamily: "var(--font-body)",
-        cursor: busy ? "default" : "pointer",
-        opacity: view.spin ? 0.75 : 1,
-        transition: "opacity 0.2s, background 0.2s",
-        whiteSpace: "nowrap",
-      }}
+      className={cn(syncPill({ tone: view.tone }), view.spin && "opacity-75")}
     >
       {view.spin ? (
         <motion.span
           animate={{ rotate: 360 }}
           transition={{ repeat: Infinity, duration: 0.9, ease: "linear" }}
-          style={{ display: "inline-flex" }}>
+          className="inline-flex">
           <Icon size={11} strokeWidth={2.4} />
         </motion.span>
       ) : (
         <Icon size={11} strokeWidth={2.4} />
       )}
       {view.label}
-    </button>
+    </Button>
   );
 }
 
@@ -1042,9 +1096,14 @@ export default function ApsaraSpendPage() {
   // E1 — notification permission: "default" | "granted" | "denied" | "unsupported"
   const [notifPermission,  setNotifPermission]  = useState<"default"|"granted"|"denied"|"unsupported">("default");
 
-  const showToast = useCallback((msg: string, type: Toast["type"] = "info", undoFn?: () => void) => {
-    const duration = undoFn ? 5000 : 3500;
-    setToast({ msg, type, undoFn });
+  const showToast = useCallback((
+    msg: string,
+    type: Toast["type"] = "info",
+    actionFn?: () => void,
+    actionLabel = "Undo",
+  ) => {
+    const duration = actionFn ? 5000 : 3500;
+    setToast({ msg, type, action: actionFn ? { label: actionLabel, run: actionFn } : undefined });
     setTimeout(() => setToast(null), duration);
   }, []);
 
@@ -1080,8 +1139,14 @@ export default function ApsaraSpendPage() {
       );
     } else if (r.reason === "offline") {
       showToast("You're offline — saved on this device, will sync automatically.", "info");
+    } else if (r.reason === "unreachable") {
+      // Asked directly, so answer directly — but this is not a failure, and the
+      // pill stays amber rather than red while the queue waits.
+      showToast("Can't reach the server — saved here, will sync automatically.", "info");
     } else if (r.reason === "unauthenticated") {
-      showToast("Can't reach the server — working from this device only.", "warn");
+      // The server answered, so "can't reach it" was never true. Reopening the
+      // app mints a fresh session and re-uploads the cache.
+      showToast("Session expired — your data is safe here. Reopen the app to reconnect.", "warn");
     } else if (r.reason === "error") {
       // No retry action: the pill itself turns into the retry affordance.
       showToast("Sync failed — your data is safe on this device.", "warn");
@@ -1090,13 +1155,15 @@ export default function ApsaraSpendPage() {
     return r;
   }, [syncNow, showToast]);
 
-  // Surface a persistent sync failure once, with a retry affordance. Offline is
-  // deliberately silent: the app is built to work that way, so it isn't news.
+  // Surface a persistent sync failure once, with a retry affordance. "error"
+  // now means the server answered and refused; a server that simply could not
+  // be reached reports as pending and stays silent, like offline does — the app
+  // is built to work that way, so it isn't news.
   const syncWarnedRef = useRef(false);
   useEffect(() => {
     if (syncStatus === "error" && !syncWarnedRef.current) {
       syncWarnedRef.current = true;
-      showToast("Could not reach the server — changes are saved locally.", "warn", syncNow);
+      showToast("Sync failed — your changes are saved on this device.", "warn", syncNow, "Retry");
     }
     if (syncStatus === "synced") syncWarnedRef.current = false;
   }, [syncStatus, showToast, syncNow]);
@@ -3269,44 +3336,47 @@ export default function ApsaraSpendPage() {
               role="alert"
               aria-live="assertive"
               aria-atomic="true"
-              initial={{ opacity: 0, y: 12, x: "-50%" }}
-              animate={{ opacity: 1, y: 0, x: "-50%" }}
-              exit={{ opacity: 0, y: 8, x: "-50%" }}
+              initial={{ opacity: 0, y: 12 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: 8 }}
               transition={{ duration: 0.22 }}
-              style={{
-                position: "fixed", bottom: 100, left: "50%", zIndex: 400,
-                background: toast.type === "warn" ? "var(--toast-warn-bg)" : toast.type === "success" ? "var(--toast-ok-bg)" : "var(--toast-info-bg)",
-                border: "1px solid",
-                borderColor: toast.type === "warn" ? "var(--toast-warn-border)" : toast.type === "success" ? "var(--toast-ok-border)" : "var(--toast-info-border)",
-                borderRadius: 14,
-                width: "fit-content",
-                maxWidth: "calc(100vw - 48px)",
-                boxShadow: "var(--toast-shadow)",
-              }}>
+              className={cn(
+                // A full-width centring rail rather than a fit-content box at
+                // left:50%. That older trick capped the toast's usable width at
+                // half the viewport — invisible while the text was nowrap and
+                // overflowing, obvious the moment it was allowed to wrap.
+                // pointer-events stay off so the rail can't swallow a FAB tap.
+                "pointer-events-none fixed inset-x-0 z-[400] flex justify-center px-4",
+                // Clears the FAB instead of landing on top of it: that pill is
+                // 52px tall and sits --sp-8 above the home indicator, which the
+                // old flat 100px ignored on any phone with a safe area.
+                "bottom-[calc(var(--sp-8)_+_52px_+_var(--sp-3)_+_env(safe-area-inset-bottom))]",
+              )}>
               {/* Content row */}
-              <div style={{ display: "flex", alignItems: "center", gap: 10, padding: toast.undoFn ? "10px 8px 10px 14px" : "10px 16px" }}>
-                <span style={{
-                  flex: 1, fontSize: 13, fontWeight: 500,
-                  color: toast.type === "warn" ? "var(--toast-warn-text)" : toast.type === "success" ? "var(--toast-ok-text)" : "var(--toast-info-text)",
-                  fontFamily: "var(--font-body)", lineHeight: 1.4,
-                  whiteSpace: "nowrap",
-                }}>
+              <div className={cn(
+                "pointer-events-auto flex w-fit max-w-md items-center gap-2.5 py-2.5",
+                "rounded-[14px] border shadow-[var(--toast-shadow)]",
+                toast.action ? "pl-3.5 pr-2" : "px-4",
+                toastSurface({ tone: toast.type }),
+              )}>
+                <span className={cn(
+                  // Wraps. It used to be nowrap inside a max-width box, so a
+                  // long message pushed the action button off the screen edge.
+                  "min-w-0 flex-1 font-sans text-[13px] font-medium leading-snug",
+                  toastText({ tone: toast.type }),
+                )}>
                   {toast.msg}
                 </span>
-                {toast.undoFn && (
-                  <button
-                    onClick={() => { toast.undoFn?.(); setToast(null); }}
-                    style={{
-                      flexShrink: 0,
-                      background: toast.type === "warn" ? "var(--toast-warn-border)" : toast.type === "success" ? "var(--toast-ok-border)" : "var(--toast-info-border)",
-                      border: "none", borderRadius: 8,
-                      padding: "6px 14px", cursor: "pointer",
-                      fontSize: 12, fontWeight: 700,
-                      color: "#fff",
-                      fontFamily: "var(--font-body)", letterSpacing: "0.02em",
-                    }}>
-                    Undo
-                  </button>
+                {toast.action && (
+                  <Button
+                    size="sm"
+                    onClick={() => { toast.action?.run(); setToast(null); }}
+                    className={cn(
+                      "shrink-0 rounded-lg px-3.5 font-sans text-xs font-bold tracking-[0.02em] text-white",
+                      toastAction({ tone: toast.type }),
+                    )}>
+                    {toast.action.label}
+                  </Button>
                 )}
               </div>
             </motion.div>

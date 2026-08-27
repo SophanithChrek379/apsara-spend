@@ -13,9 +13,15 @@ import {
 import { diffLedger, reconcileLedger, pushedState, isUuid, type PushedState } from "@/lib/ledger/diff";
 import { ensureSession, recoverSession } from "@/lib/ledger/session";
 import { readAccount, takeOAuthIntent, type Account, type OAuthIntent } from "@/lib/ledger/account";
-import { pushOps, ApiError } from "@/lib/ledger/api";
+import { pushOps, ApiError, NetworkError } from "@/lib/ledger/api";
 
-export type SyncStatus = "loading" | "synced" | "pending" | "offline" | "error";
+/**
+ * "local" is a session the app could not recover — the writes are safe in the
+ * cache but there is no identity to file them under. It used to report as
+ * "offline", which was the one thing it demonstrably was not: the request
+ * reached the server and came back 401.
+ */
+export type SyncStatus = "loading" | "synced" | "pending" | "offline" | "local" | "error";
 
 /**
  * What a manual "Sync now" tap resolves to, so the UI can report something
@@ -27,7 +33,12 @@ export interface SyncResult {
   pushed: number;
   /** Transactions the server holds afterwards. */
   total: number;
-  reason?: "offline" | "unauthenticated" | "busy" | "error";
+  /**
+   * "unreachable" is distinct from "offline": the device has a working radio,
+   * the server just did not answer. Same consequence for the data — queued,
+   * retried — but the user is not offline and must not be told they are.
+   */
+  reason?: "offline" | "unreachable" | "unauthenticated" | "busy" | "error";
 }
 
 /** crypto.randomUUID needs a secure context; this keeps http:// LAN testing working. */
@@ -259,7 +270,9 @@ export function useSyncedLedger() {
     try {
       const userId = await ensureSession();
       if (!userId) {
-        setStatus("offline");
+        // No session and none could be minted. Same story as a 401: the cache
+        // holds everything, nothing is going up until an identity exists.
+        setStatus("local");
         return { ok: false, pushed: 0, total: localTotal(), reason: "unauthenticated" };
       }
       adoptIdentity(userId);
@@ -299,18 +312,36 @@ export function useSyncedLedger() {
       if (pending > 0) resyncRef.current = true;
       return { ok: true, pushed: ops.length, total: dataRef.current.transactions.length };
     } catch (err) {
-      const offline = typeof navigator !== "undefined" && navigator.onLine === false;
-      if (offline) setStatus("pending");
-      else if (err instanceof ApiError && err.status === 401) setStatus("offline");
-      else {
+      // navigator.onLine reports the radio, not reachability. A phone on 5G
+      // that cannot reach this server is "online" and still has nowhere to put
+      // the write, and answering that with a red "Sync failed" contradicts the
+      // very next thing the app says — that the change is saved and will go up
+      // on its own. A request that never got a reply leaves the queue intact,
+      // so it reports as pending, exactly like being offline does.
+      //
+      // "error" is kept for what it should always have meant: the server
+      // answered and refused. That one is worth alarming about.
+      const offline     = typeof navigator !== "undefined" && navigator.onLine === false;
+      const unreachable = err instanceof NetworkError;
+
+      if (offline || unreachable) {
+        if (unreachable) console.warn("[ledger] server unreachable — queue kept:", err);
+        setStatus(diffLedger(snapshotRef.current, dataRef.current).length > 0 ? "pending" : "offline");
+      } else if (err instanceof ApiError && err.status === 401) {
+        setStatus("local");
+      } else {
         console.warn("[ledger] sync failed:", err);
         setStatus("error");
       }
+
       return {
         ok: false,
         pushed: 0,
         total: localTotal(),
-        reason: offline ? "offline" : err instanceof ApiError && err.status === 401 ? "unauthenticated" : "error",
+        reason: offline ? "offline"
+          : unreachable ? "unreachable"
+          : err instanceof ApiError && err.status === 401 ? "unauthenticated"
+          : "error",
       };
     } finally {
       syncingRef.current = false;
@@ -463,12 +494,14 @@ export function useSyncedLedger() {
         //
         // Retried, because this is the round trip that decides whether the user
         // sees the server's ledger at all, and a cold open on a flaky mobile
-        // connection is exactly when it fails. Only a genuine error is retried:
-        // offline and unauthenticated are handled by the reconnect listeners,
-        // and "busy" means a flush is already running and will resync.
+        // connection is exactly when it fails. A server that never answered is
+        // retried alongside one that errored — that IS the flaky cold open this
+        // loop exists for. Offline and unauthenticated are handled by the
+        // reconnect listeners, and "busy" means a flush is already running.
         for (let attempt = 0; !cancelled; attempt++) {
           const result = await sync({ pull: true });
-          if (result.ok || result.reason !== "error") break;
+          const retryable = result.reason === "error" || result.reason === "unreachable";
+          if (result.ok || !retryable) break;
           if (attempt >= BOOT_RETRY_DELAYS_MS.length) break;
           await sleep(BOOT_RETRY_DELAYS_MS[attempt]);
         }
