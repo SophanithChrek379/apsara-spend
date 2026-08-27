@@ -3,6 +3,7 @@ import { cookies } from "next/headers";
 import type { User, SupabaseClient } from "@supabase/supabase-js";
 import { createClient, isSupabaseConfigured } from "@/utils/supabase/server";
 import { ValidationError } from "@/lib/validation";
+import { TransactionIdTakenError } from "@/lib/repository";
 
 export class AuthError extends Error {}
 /** Env vars absent — a deployment problem, not a client problem. */
@@ -56,6 +57,11 @@ export const route = <Ctx>(
     }
     if (err instanceof ValidationError) {
       return NextResponse.json({ error: err.message }, { status: 400 });
+    }
+    // 409, not 500: the id is the client's to choose, so the client is also the
+    // only side that can resolve the clash — by picking a new one.
+    if (err instanceof TransactionIdTakenError) {
+      return NextResponse.json({ error: err.message, code: "id_taken" }, { status: 409 });
     }
     console.error("[api]", err);
     return NextResponse.json({ error: "Internal error" }, { status: 500 });

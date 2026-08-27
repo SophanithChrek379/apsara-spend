@@ -50,20 +50,25 @@ const parseOps = (body: unknown): SyncOp[] => {
  * path the one-time localStorage import uses. With pull:true the authoritative
  * ledger comes back in the same response, so the client can reconcile without
  * a follow-up GET.
+ *
+ * `rejected` lists transaction ids another user already owns — see
+ * TransactionIdTakenError. They are skipped rather than failing the batch, and
+ * the client re-keys them before sending them again.
  */
 export const POST = route(async (req) => {
   const { supabase, user } = await requireUser();
   const body = await readJson(req);
 
   const ops = parseOps(body);
-  const { applied } = await applyOps(supabase, user.id, ops);
+  const { applied, rejected } = await applyOps(supabase, user.id, ops);
 
   const wantsPull = (body as { pull?: unknown }).pull === true;
-  if (!wantsPull) return NextResponse.json({ applied });
+  if (!wantsPull) return NextResponse.json({ applied, rejected });
 
   const { transactions, monthlyBalances } = await fetchLedger(supabase);
   return NextResponse.json({
     applied,
+    rejected,
     ledger: { schema_version: SCHEMA_VERSION, transactions, monthlyBalances },
   });
 });

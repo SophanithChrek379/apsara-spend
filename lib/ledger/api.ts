@@ -91,29 +91,34 @@ export const fetchLedger = async (): Promise<AppData> => {
 export const pushOps = async (
   ops: SyncOp[],
   opts: { pull?: boolean } = {},
-): Promise<{ applied: number; ledger?: AppData }> => {
+): Promise<{ applied: number; rejected: string[]; ledger?: AppData }> => {
   if (ops.length === 0) {
-    if (!opts.pull) return { applied: 0 };
-    return { applied: 0, ledger: await fetchLedger() };
+    if (!opts.pull) return { applied: 0, rejected: [] };
+    return { applied: 0, rejected: [], ledger: await fetchLedger() };
   }
 
   let applied = 0;
+  const rejected: string[] = [];
   let ledger: AppData | undefined;
 
   for (let i = 0; i < ops.length; i += OPS_PER_BATCH) {
     const chunk  = ops.slice(i, i + OPS_PER_BATCH);
     const isLast = i + OPS_PER_BATCH >= ops.length;
 
-    const res = await request<{ applied: number; ledger?: AppData }>("/api/sync", {
-      method: "POST",
-      body: JSON.stringify({ ops: chunk, pull: isLast && opts.pull === true }),
-    });
+    const res = await request<{ applied: number; rejected?: string[]; ledger?: AppData }>(
+      "/api/sync",
+      {
+        method: "POST",
+        body: JSON.stringify({ ops: chunk, pull: isLast && opts.pull === true }),
+      },
+    );
 
     applied += res.applied ?? 0;
+    if (res.rejected?.length) rejected.push(...res.rejected);
     if (res.ledger) ledger = res.ledger;
   }
 
-  return { applied, ledger };
+  return { applied, rejected, ledger };
 };
 
 // ── Single-resource CRUD ────────────────────────────────────────────────────

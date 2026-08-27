@@ -32,6 +32,28 @@ const unwrap = <T>(res: { data: T | null; error: { message: string } | null }): 
   return res.data as T;
 };
 
+/**
+ * A transaction id that already exists under a DIFFERENT user.
+ *
+ * PostgREST's upsert is INSERT ... ON CONFLICT (id) DO UPDATE, and RLS hides the
+ * conflicting row rather than removing the conflict: Postgres takes the UPDATE
+ * branch and then rejects the row it cannot see against the update policy's
+ * USING clause — "new row violates row-level security policy (USING
+ * expression)". It happens when a replaced anonymous identity re-uploads a
+ * ledger whose ids the previous uid still owns.
+ *
+ * Only the client can resolve it, by re-keying its local copy, so this is its
+ * own error rather than an opaque 500.
+ */
+export class TransactionIdTakenError extends Error {
+  constructor(readonly id: string) {
+    super(`Transaction ${id} already exists under another user`);
+  }
+}
+
+/** Postgres reports every RLS denial as insufficient_privilege. */
+const RLS_DENIED = "42501";
+
 // ── transactions ───────────────────────────────────────────────────────────
 
 /**
@@ -100,14 +122,17 @@ export const upsertTransaction = async (
   supabase: SupabaseClient,
   tx: Transaction,
 ): Promise<Transaction> => {
-  const row = unwrap(
-    await supabase
-      .from("transactions")
-      .upsert(transactionToRow(tx), { onConflict: "id" })
-      .select(TX_COLUMNS)
-      .single(),
-  ) as unknown as TransactionRow;
-  return rowToTransaction(row);
+  const res = await supabase
+    .from("transactions")
+    .upsert(transactionToRow(tx), { onConflict: "id" })
+    .select(TX_COLUMNS)
+    .single();
+
+  if (res.error) {
+    if (res.error.code === RLS_DENIED) throw new TransactionIdTakenError(tx.id);
+    throw new Error(res.error.message);
+  }
+  return rowToTransaction(res.data as unknown as TransactionRow);
 };
 
 export const updateTransaction = async (
@@ -218,18 +243,33 @@ export const fetchLedger = async (supabase: SupabaseClient) => {
  * a mid-list failure leaves earlier ops applied. Every op is idempotent (upsert
  * by id, delete by id, upsert by month), so the client simply retries the whole
  * queue — replaying an applied op is a no-op rather than a duplicate.
+ *
+ * `rejected` carries the ids of transactions another user already owns; those
+ * are skipped, not applied. See TransactionIdTakenError.
  */
 export const applyOps = async (
   supabase: SupabaseClient,
   userId: string,
   ops: SyncOp[],
-): Promise<{ applied: number }> => {
+): Promise<{ applied: number; rejected: string[] }> => {
   let applied = 0;
+  const rejected: string[] = [];
 
   for (const op of ops) {
     switch (op.type) {
       case "upsertTx":
-        await upsertTransaction(supabase, op.tx);
+        try {
+          await upsertTransaction(supabase, op.tx);
+        } catch (err) {
+          // Skipped rather than fatal: one id owned by another user would
+          // otherwise strand every op behind it, batch after batch. The client
+          // re-keys what comes back here and sends it again.
+          if (err instanceof TransactionIdTakenError) {
+            rejected.push(op.tx.id);
+            continue;
+          }
+          throw err;
+        }
         break;
       case "deleteTx":
         await deleteTransaction(supabase, op.id);
@@ -252,5 +292,5 @@ export const applyOps = async (
     applied++;
   }
 
-  return { applied };
+  return { applied, rejected };
 };

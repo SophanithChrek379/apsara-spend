@@ -176,10 +176,39 @@ export function useSyncedLedger() {
   }, []);
 
   /**
+   * Mint fresh uuids for local transactions — all of them, or just `ids`.
+   *
+   * Persisted to the cache BEFORE anything is pushed, same ordering rule as the
+   * pre-database remap on boot: a retry has to reuse these uuids, or a push that
+   * failed halfway re-inserts every row it already landed.
+   */
+  const rekeyTransactions = useCallback((ids?: ReadonlySet<string>) => {
+    const local = dataRef.current;
+    const next: AppData = {
+      ...local,
+      transactions: local.transactions.map((t) =>
+        ids && !ids.has(t.id) ? t : { ...t, id: newUuid() },
+      ),
+    };
+    writeCache(next);
+    dataRef.current = next; // refs sync on render; callers below read it now
+    setDataRaw(next);
+  }, []);
+
+  /**
    * A replaced anonymous identity (cookies cleared, refresh token revoked) owns
    * no rows, so its ledger reads as empty. Clearing the snapshot turns that from
    * "adopt an empty ledger over the cache" into "re-upload the cache under the
    * new uid" — the local data is the same data either way, and it stays visible.
+   *
+   * The re-upload needs new ids as well. The previous uid's rows are still in
+   * the table under the very ids the cache holds, and an upsert onto a row this
+   * user cannot see is not an insert: Postgres takes ON CONFLICT DO UPDATE and
+   * the update policy's USING clause rejects it —
+   *   new row violates row-level security policy (USING expression)
+   * — which killed the whole flush on its first row, permanently, because the
+   * uid was already recorded and this ran only once. Re-keying sidesteps the
+   * collision; the old copies are unreachable to everyone either way.
    */
   const adoptIdentity = useCallback((userId: string) => {
     const known = readUserId();
@@ -187,11 +216,12 @@ export function useSyncedLedger() {
 
     if (known) {
       console.warn("[ledger] anonymous identity changed — re-uploading the local ledger under the new user");
+      rekeyTransactions();
       snapshotRef.current = defaultData();
       writeSnapshot(snapshotRef.current);
     }
     writeUserId(userId);
-  }, []);
+  }, [rekeyTransactions]);
 
   /**
    * A 401 from our own API means the access token went stale — the app was
@@ -238,7 +268,18 @@ export function useSyncedLedger() {
       const local      = dataRef.current;
       const ops        = diffLedger(snapshotRef.current, local);
 
-      const { ledger } = await pushWithAuthRetry(ops, opts.pull !== false);
+      const { ledger, rejected } = await pushWithAuthRetry(ops, opts.pull !== false);
+
+      // Ids the server refused because another user owns them — an identity
+      // change that got halfway before this fix, or a cache restored onto a
+      // different uid. Re-keying here is what lets a ledger already stuck in
+      // that state heal itself: the new ids appear in neither the snapshot nor
+      // the pushed set, so the merge below keeps those rows as pending local
+      // writes and the resync it triggers inserts them cleanly.
+      if (rejected.length > 0) {
+        console.warn(`[ledger] ${rejected.length} transaction id(s) owned by another user — re-keying`);
+        rekeyTransactions(new Set(rejected));
+      }
 
       if (ledger) {
         adopt(ledger, pushedState(ops));
@@ -248,11 +289,15 @@ export function useSyncedLedger() {
         return { ok: true, pushed: ops.length, total: ledger.transactions.length };
       }
 
+      // No pull to merge, so the snapshot is what the server was told. Anything
+      // re-keyed above is absent from it and stays pending, as it should.
       snapshotRef.current = local;
       writeSnapshot(local);
-      setPendingCount(0);
-      setStatus("synced");
-      return { ok: true, pushed: ops.length, total: local.transactions.length };
+      const pending = diffLedger(local, dataRef.current).length;
+      setPendingCount(pending);
+      setStatus(pending > 0 ? "pending" : "synced");
+      if (pending > 0) resyncRef.current = true;
+      return { ok: true, pushed: ops.length, total: dataRef.current.transactions.length };
     } catch (err) {
       const offline = typeof navigator !== "undefined" && navigator.onLine === false;
       if (offline) setStatus("pending");
@@ -274,7 +319,7 @@ export function useSyncedLedger() {
         void sync({ pull: true });
       }
     }
-  }, [adopt, adoptIdentity, pushWithAuthRetry]);
+  }, [adopt, adoptIdentity, rekeyTransactions, pushWithAuthRetry]);
 
   // ── Account (Google on top of the anonymous session) ─────────────────────
 
