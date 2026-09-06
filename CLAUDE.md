@@ -7,9 +7,14 @@ lives in `@theme` inside [app/globals.css](app/globals.css)) and shadcn/ui
 ## Rules
 
 @.claude/rules/ui-styling.md
+@.claude/rules/autonomy.md
 
 For building or migrating UI, follow the `shadcn-ui` skill in
 [.claude/skills/shadcn-ui/](.claude/skills/shadcn-ui/).
+
+To carry a task to completion without stopping for approval at each step —
+scope it, implement it, verify it, loop on failures — follow the `dev-loop`
+skill in [.claude/skills/dev-loop/](.claude/skills/dev-loop/).
 
 For anything touching accounts — anonymous sessions, email + OTP, Google OAuth,
 RLS — verify with the `auth-smoke-test` skill in
