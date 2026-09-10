@@ -82,9 +82,8 @@ Then a one-off script (`node script.js`) using `require('playwright')` via
 http://localhost:3000 out.png` after the browser is installed, or a short
 inline script with `chromium.launch()` → `page.goto()` → `page.screenshot()`
 for anything needing interaction (login, clicks). The app requires Google
-OAuth (see [auth-smoke-test](../auth-smoke-test/SKILL.md)) — Playwright can't
-drive Google's consent screen, so this only proves the anonymous-session
-landing page renders, not a signed-in state.
+OAuth — Playwright can't drive Google's consent screen, so this only proves
+the anonymous-session landing page renders, not a signed-in state.
 
 Skip this step unless the user asks for visual confirmation — build success
 + the curl check above is normally sufficient proof the app runs.
