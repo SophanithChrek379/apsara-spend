@@ -2,10 +2,10 @@
 // client and the route handlers can never drift out of sync.
 
 export type Currency   = "USD" | "KHR";
-export type CategoryId = "food" | "transpo" | "bills" | "social" | "shop" | "misc";
+export type CategoryId = "food" | "drink" | "transpo" | "bills" | "social" | "shop" | "misc";
 
 export const CATEGORY_IDS: readonly CategoryId[] = [
-  "food", "transpo", "bills", "social", "shop", "misc",
+  "food", "drink", "transpo", "bills", "social", "shop", "misc",
 ] as const;
 
 export interface Transaction {

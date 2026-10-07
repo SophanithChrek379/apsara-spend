@@ -19,7 +19,7 @@ import { downloadBackupJson, downloadCsv } from "@/lib/ledger/export";
 import { isoFromDay, dayFromIso, monthKeyFromIso, todayDay, nowTimeOfDay, formatDisplayDate, formatDisplayTime, formatTimeOfDay } from "@/lib/calendar-day";
 import { buildReport, type ReportPeriod } from "@/lib/report";
 import { makeByNewest } from "@/lib/tx-order";
-import { CATEGORIES } from "@/lib/categories";
+import { CATEGORIES, MISC_CATEGORY } from "@/lib/categories";
 import { ReportSheet } from "@/components/report/ReportSheet";
 import { OverlayPickerField } from "@/components/transactions/OverlayPickerField";
 import { AccountSheet, type AuthMode } from "@/components/account/AccountSheet";
@@ -760,8 +760,8 @@ function EntryModal({ tx, selectedMonth, monthBalance, totalUSD: currentTotal, c
           />
         </div>
 
-        {/* Category picker — horizontal 1×6 row */}
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(6, 1fr)", gap: 8, marginBottom: 16 }}>
+        {/* Category picker — 4-up grid, wrapping to 4 + 3 */}
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 8, marginBottom: 16 }}>
           {CATEGORIES.map((c) => {
             const active = cat === c.id;
             return (
@@ -1923,7 +1923,10 @@ export default function ApsaraSpendPage() {
         return (
           <>
             {visible.map((tx, i) => {
-            const cat      = CATEGORIES.find((c) => c.id === tx.category) ?? CATEGORIES[5];
+            // Fallback by id, not index: a row can carry a category this build
+            // doesn't know (synced from a newer client, or hand-edited), and
+            // "misc" is the honest bucket for it wherever it sits in the list.
+            const cat      = CATEGORIES.find((c) => c.id === tx.category) ?? MISC_CATEGORY;
             const txDate   = dayFromIso(tx.date);
             const dateStr  = formatDisplayDate(txDate);
             const isFirst  = !seenDates.has(txDate);

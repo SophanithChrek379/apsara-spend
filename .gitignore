@@ -29,3 +29,7 @@ next-env.d.ts
 # OS
 .DS_Store
 Thumbs.db
+
+# Supabase CLI scratch (supabase/.temp holds a start-secrets file)
+supabase/.temp/
+supabase/.branches/
