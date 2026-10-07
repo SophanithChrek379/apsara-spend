@@ -125,3 +125,31 @@ export const canonicalizeIso = (iso: string): string => {
   if (Number.isNaN(d.getTime())) return iso; // leave junk alone; validation rejects it
   return isoFromDay(todayDay(d));
 };
+
+/**
+ * Minutes since local midnight for the time a row actually *shows*.
+ *
+ * The list prints `time` when the user picked one and falls back to the local
+ * clock reading of `createdAt` otherwise — see `formatTimeOfDay` and
+ * `formatDisplayTime`. Anything that orders rows has to key off the same value,
+ * or the list sorts by something other than the time printed under each row.
+ *
+ * The `now` fallback covers the optimistic row that has neither field yet: it
+ * was just added on this device, so the current clock is the honest reading and
+ * keeps it where the user expects rather than at midnight.
+ */
+export const clockMinutes = (
+  time: string | undefined,
+  createdAt: string | undefined,
+  now = new Date(),
+): number => {
+  if (time) {
+    const [h, m] = time.split(":").map(Number);
+    if (Number.isFinite(h) && Number.isFinite(m)) return h * 60 + m;
+  }
+  if (createdAt) {
+    const d = new Date(createdAt);
+    if (!Number.isNaN(d.getTime())) return d.getHours() * 60 + d.getMinutes();
+  }
+  return now.getHours() * 60 + now.getMinutes();
+};

@@ -18,6 +18,7 @@ import { useSyncedLedger, newTransactionId, type SyncStatus, type SyncResult } f
 import { downloadBackupJson, downloadCsv } from "@/lib/ledger/export";
 import { isoFromDay, dayFromIso, monthKeyFromIso, todayDay, nowTimeOfDay, formatDisplayDate, formatDisplayTime, formatTimeOfDay } from "@/lib/calendar-day";
 import { buildReport, type ReportPeriod } from "@/lib/report";
+import { makeByNewest } from "@/lib/tx-order";
 import { CATEGORIES } from "@/lib/categories";
 import { ReportSheet } from "@/components/report/ReportSheet";
 import { OverlayPickerField } from "@/components/transactions/OverlayPickerField";
@@ -1824,22 +1825,10 @@ export default function ApsaraSpendPage() {
     [monthTxs, filterCategory]
   );
 
-  // Newest first. Same-day entries tie-break on createdAt (when the row has
-  // synced and carries a real server instant) so the most recently *added*
-  // entry sits on top, matching how the list reads to the user — not on id,
-  // whose UUID ordering has no relation to when the row was written.
-  // An optimistic row has no createdAt yet; it just came from this device, so
-  // it's treated as "now" and floats to the top rather than sinking to the
-  // bottom of its day until the next sync fills the field in.
-  const sortedTxs = useMemo(() => {
-    const now = new Date().toISOString();
-    const createdKey = (t: Transaction) => t.createdAt ?? now;
-    return [...filteredTxs].sort((a, b) =>
-      new Date(b.date).getTime() - new Date(a.date).getTime() ||
-      createdKey(b).localeCompare(createdKey(a)) ||
-      b.id.localeCompare(a.id)
-    );
-  },
+  // Newest first, within a day by the clock time each row prints. See
+  // lib/tx-order.ts — the report sorts with the same comparator.
+  const sortedTxs = useMemo(
+    () => [...filteredTxs].sort(makeByNewest()),
     [filteredTxs]
   );
 

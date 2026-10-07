@@ -12,6 +12,7 @@
 
 import type { CategoryId, Transaction } from "@/lib/types";
 import { monthKeyFromIso, dayFromIso } from "@/lib/calendar-day";
+import { makeByNewest } from "@/lib/tx-order";
 
 const pin2 = (v: number) => Math.round(v * 100) / 100;
 
@@ -181,19 +182,6 @@ export interface ReportData {
 
 const RECENT_LIMIT = 5;
 
-/**
- * Descending by day, id breaking ties so the order is stable across renders.
- *
- * The tiebreak direction matches the dashboard's `sortedTxs` deliberately. Ids
- * are uuids, so neither direction means anything on its own — but the report's
- * "Recent entries" and the list behind it show the same rows, and same-day
- * entries appearing in opposite orders in the two places reads as a bug.
- */
-const byNewest = (a: Transaction, b: Transaction) => {
-  const d = dayFromIso(b.date).localeCompare(dayFromIso(a.date));
-  return d !== 0 ? d : b.id.localeCompare(a.id);
-};
-
 export const buildReport = (
   transactions: Transaction[],
   monthlyBalances: Record<string, number>,
@@ -204,7 +192,9 @@ export const buildReport = (
 
   const months  = monthsInPeriod(period, anchorMonth, ledgerMonths);
   const inScope = new Set(months);
-  const txs     = transactions.filter((t) => inScope.has(monthKeyFromIso(t.date))).sort(byNewest);
+  // Newest first — the same comparator the dashboard list uses, so "Recent
+  // entries" and the list behind it can never order the same rows differently.
+  const txs     = transactions.filter((t) => inScope.has(monthKeyFromIso(t.date))).sort(makeByNewest());
 
   const count = txs.length;
   const total = pin2(txs.reduce((s, t) => s + t.amountUSD, 0));
