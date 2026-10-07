@@ -3,10 +3,14 @@ import type {
   Transaction,
   TransactionRow,
   MonthlyBudgetRow,
+  AnnualIncome,
+  AnnualIncomeRow,
   SyncOp,
 } from "@/lib/types";
 import { rowToTransaction, transactionToRow, rowsToMonthlyBalances } from "@/lib/mappers";
-import { assertMonthKey, assertUuid, assertBudgetUSD, ValidationError } from "@/lib/validation";
+import {
+  assertMonthKey, assertUuid, assertBudgetUSD, assertYear, assertIncomeUSD, ValidationError,
+} from "@/lib/validation";
 
 /**
  * All database access lives here so the REST routes and the batch/sync endpoint
@@ -222,6 +226,54 @@ export const deleteBudget = async (
       .eq("month", assertMonthKey(month))
       .select("month"),
   ) as unknown as { month: string }[];
+  return rows.length > 0;
+};
+
+// ── annual income ──────────────────────────────────────────────────────────
+// Kept out of fetchLedger on purpose: the ledger is cached in localStorage and
+// salary must only ever be fetched on demand, after the client's Face ID gate.
+
+export const listIncome = async (supabase: SupabaseClient): Promise<AnnualIncome> => {
+  const rows = unwrap(
+    await supabase.from("annual_income").select("year, amount_usd").order("year"),
+  ) as unknown as AnnualIncomeRow[];
+  return Object.fromEntries(rows.map((r) => [r.year, Number(r.amount_usd)]));
+};
+
+export const setIncome = async (
+  supabase: SupabaseClient,
+  userId: string,
+  year: number,
+  amount: number,
+): Promise<{ year: number; amount: number }> => {
+  const row = unwrap(
+    await supabase
+      .from("annual_income")
+      .upsert(
+        {
+          user_id:    userId, // half of the composite PK, so it must be explicit
+          year:       assertYear(year),
+          amount_usd: assertIncomeUSD(amount),
+        },
+        { onConflict: "user_id,year" },
+      )
+      .select("year, amount_usd")
+      .single(),
+  ) as unknown as AnnualIncomeRow;
+  return { year: row.year, amount: Number(row.amount_usd) };
+};
+
+export const deleteIncome = async (
+  supabase: SupabaseClient,
+  year: number,
+): Promise<boolean> => {
+  const rows = unwrap(
+    await supabase
+      .from("annual_income")
+      .delete()
+      .eq("year", assertYear(year))
+      .select("year"),
+  ) as unknown as { year: number }[];
   return rows.length > 0;
 };
 

@@ -1,4 +1,4 @@
-import type { AppData, SyncOp, Transaction } from "@/lib/types";
+import type { AnnualIncome, AppData, SyncOp, Transaction } from "@/lib/types";
 import { SCHEMA_VERSION } from "@/lib/constants";
 
 /**
@@ -163,5 +163,23 @@ export const putBudget = (month: string, amount: number) =>
 
 export const removeBudget = (month: string) =>
   request<{ deleted: string }>(`/api/budgets?month=${encodeURIComponent(month)}`, {
+    method: "DELETE",
+  });
+
+// ── Annual income ───────────────────────────────────────────────────────────
+// Never routed through the ledger cache — called only while the salary lock is
+// open, and the result lives in component state alone.
+
+export const listIncome = () =>
+  request<{ income: AnnualIncome }>("/api/income").then((r) => r.income);
+
+export const putIncome = (year: number, amount: number) =>
+  request<{ income: { year: number; amount: number } }>("/api/income", {
+    method: "PUT",
+    body: JSON.stringify({ year, amount }),
+  }).then((r) => r.income);
+
+export const removeIncome = (year: number) =>
+  request<{ deleted: number }>(`/api/income?year=${encodeURIComponent(year)}`, {
     method: "DELETE",
   });

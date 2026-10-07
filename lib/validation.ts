@@ -2,6 +2,7 @@ import {
   CATEGORY_IDS,
   MAX_AMOUNT_USD,
   MAX_BUDGET_USD,
+  MAX_INCOME_USD,
   type CategoryId,
   type Transaction,
 } from "@/lib/types";
@@ -54,6 +55,21 @@ export const assertBudgetUSD = (v: unknown): number => {
   const rounded = Math.round(n * 100) / 100;
   if (rounded < 0)              fail("amount must not be negative");
   if (rounded > MAX_BUDGET_USD) fail(`amount must not exceed ${MAX_BUDGET_USD}`);
+  return rounded;
+};
+
+/** A calendar year, within the annual_income CHECK constraint. */
+export const assertYear = (v: unknown): number => {
+  const n = typeof v === "number" ? v : Number(v);
+  return Number.isInteger(n) && n >= 2000 && n <= 2100 ? n : fail("year must be between 2000 and 2100");
+};
+
+export const assertIncomeUSD = (v: unknown): number => {
+  const n = typeof v === "number" ? v : Number(v);
+  if (!Number.isFinite(n))      fail("amount must be a number");
+  const rounded = Math.round(n * 100) / 100;
+  if (rounded <= 0)             fail("amount must be greater than 0");
+  if (rounded > MAX_INCOME_USD) fail(`amount must not exceed ${MAX_INCOME_USD}`);
   return rounded;
 };
 

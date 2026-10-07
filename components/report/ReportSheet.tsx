@@ -24,6 +24,7 @@ import {
 } from "recharts";
 import { ChevronRight, Receipt, X } from "lucide-react";
 
+import { IncomeCard } from "@/components/report/IncomeCard";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -221,13 +222,17 @@ export function ReportSheet({
             </Select>
 
             {count === 0 ? (
-              <Card className="items-center gap-1.5 rounded-2xl bg-background px-5 py-10 text-center shadow-none">
-                <Receipt size={28} strokeWidth={1.6} className="mb-1.5 text-ghost" />
-                <div className="text-sm font-semibold text-muted-foreground">Nothing to report yet</div>
-                <div className="text-xs leading-[1.5] text-ghost">
-                  No entries in {PERIOD_LABELS[period].toLowerCase()}. Try a wider period.
-                </div>
-              </Card>
+              <>
+                <Card className="items-center gap-1.5 rounded-2xl bg-background px-5 py-10 text-center shadow-none">
+                  <Receipt size={28} strokeWidth={1.6} className="mb-1.5 text-ghost" />
+                  <div className="text-sm font-semibold text-muted-foreground">Nothing to report yet</div>
+                  <div className="text-xs leading-[1.5] text-ghost">
+                    No entries in {PERIOD_LABELS[period].toLowerCase()}. Try a wider period.
+                  </div>
+                </Card>
+                {/* Income is still worth seeing in a period with no spending. */}
+                <IncomeCard report={data} fmt={fmt} />
+              </>
             ) : (
               <>
                 {/* ── Total spent + trend (Area chart – gradient) ── */}
@@ -280,6 +285,9 @@ export function ReportSheet({
                     </ChartContainer>
                   </CardContent>
                 </Card>
+
+                {/* ── Income vs spending — salary behind Face ID ── */}
+                <IncomeCard report={data} fmt={fmt} />
 
                 {/* ── Budget (Radial chart – text) ── */}
                 <SectionCard

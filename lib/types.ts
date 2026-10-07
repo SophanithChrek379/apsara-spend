@@ -33,6 +33,10 @@ export interface AppData {
 
 export const MAX_AMOUNT_USD = 9_999.99;
 export const MAX_BUDGET_USD = 9_999_999.99;
+export const MAX_INCOME_USD = 99_999_999.99;
+
+/** key = calendar year, value = USD salary for that year. */
+export type AnnualIncome = Record<number, number>;
 
 // ── Database row shapes (snake_case, as returned by PostgREST) ──────────────
 
@@ -49,6 +53,12 @@ export interface TransactionRow {
 
 export interface MonthlyBudgetRow {
   month: string;
+  amount_usd: number | string;
+  updated_at?: string;
+}
+
+export interface AnnualIncomeRow {
+  year: number;
   amount_usd: number | string;
   updated_at?: string;
 }
