@@ -1040,7 +1040,7 @@ export default function ApsaraSpendPage() {
   // rather than inside the sheet so closing the report and reopening it keeps
   // the window you were looking at; the sheet unmounts on close.
   const [showReport,       setShowReport]       = useState(false);
-  const [reportPeriod,     setReportPeriod]     = useState<ReportPeriod>("month");
+  const [reportPeriod,     setReportPeriod]     = useState<ReportPeriod>("year");
   const [toast,            setToast]            = useState<Toast | null>(null);
   // L1 — category filter for the Entries list.
   //

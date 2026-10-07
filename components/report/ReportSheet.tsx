@@ -12,65 +12,94 @@
 // Radix owns the focus trap, the Escape key and the scroll lock; the header is
 // a flex sibling of the scroll container rather than `position: sticky`, so it
 // cannot drift while the body scrolls under it.
+//
+// Charts are shadcn/ui's chart primitive over recharts. Series colours go in
+// through ChartConfig, which scopes them as `--color-<key>` on the container —
+// so marks reference `var(--color-food)` and never a hex.
 
 import * as React from "react";
-import { motion } from "framer-motion";
-import { ChevronDown, Receipt, X } from "lucide-react";
+import {
+  Area, AreaChart, Bar, BarChart, CartesianGrid, Cell, Label, LabelList,
+  Pie, PieChart, PolarAngleAxis, RadialBar, RadialBarChart, XAxis,
+} from "recharts";
+import { ChevronRight, Receipt, X } from "lucide-react";
 
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
-  Sheet,
-  SheetClose,
-  SheetContent,
-  SheetDescription,
-  SheetTitle,
+  Card, CardAction, CardContent, CardDescription, CardFooter, CardHeader, CardTitle,
+} from "@/components/ui/card";
+import {
+  ChartContainer, ChartTooltip, ChartTooltipContent, type ChartConfig,
+} from "@/components/ui/chart";
+import {
+  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
+} from "@/components/ui/select";
+import {
+  Sheet, SheetClose, SheetContent, SheetDescription, SheetTitle,
 } from "@/components/ui/sheet";
-import { dayFromIso, formatDisplayDate } from "@/lib/calendar-day";
+import {
+  Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
+} from "@/components/ui/table";
+import { dayFromIso, formatDisplayDate, formatDisplayTime, formatTimeOfDay } from "@/lib/calendar-day";
 import { CATEGORIES } from "@/lib/categories";
-import { PERIOD_LABELS, type ReportData, type ReportPeriod } from "@/lib/report";
+import {
+  PERIOD_LABELS, SIZE_BANDS, type ReportData, type ReportPeriod,
+} from "@/lib/report";
 import type { CategoryId, Currency } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
-function StatTile({ label, value, unit, hint }: {
-  label: string; value: string; unit?: string; hint: string;
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+const categoryMeta = (id: CategoryId) => CATEGORIES.find((c) => c.id === id)!;
+
+/** One config for every category chart, keyed by category id. */
+const CATEGORY_CONFIG = Object.fromEntries(
+  CATEGORIES.map((c) => [c.id, { label: c.label, color: c.color }]),
+) satisfies ChartConfig;
+
+const SIZE_CONFIG = {
+  count: { label: "Entries" },
+  ...Object.fromEntries(SIZE_BANDS.map((b) => [b.id, { label: b.label, color: b.color }])),
+} satisfies ChartConfig;
+
+const TREND_CONFIG = {
+  total: { label: "Spent", color: "var(--ui-primary)" },
+} satisfies ChartConfig;
+
+/** Category and band colours are only known at runtime. Each element that
+ *  needs one gets it as a single `--swatch` custom property; every visual use
+ *  of it (`bg-(--swatch)`, `text-(--swatch)/…`) stays a utility class. */
+const swatch = (color: string) => ({ "--swatch": color }) as React.CSSProperties;
+
+function SectionCard({ title, description, action, children, footer, className }: {
+  title: string;
+  description?: string;
+  action?: React.ReactNode;
+  children: React.ReactNode;
+  footer?: React.ReactNode;
+  className?: string;
 }) {
   return (
-    <div className="flex min-w-0 flex-col gap-1.5 rounded-[14px] border border-border bg-background px-4 py-3.5">
-      <div className="truncate text-xs text-muted-foreground">{label}</div>
-      <div className="flex min-w-0 items-baseline gap-[3px]">
-        <span className="font-display text-[26px] leading-none font-extrabold tracking-[-0.03em] text-foreground">
-          {value}
-        </span>
-        {unit && (
-          <span className="text-[13px] font-semibold text-muted-foreground">{unit}</span>
+    <Card className={cn("gap-4 rounded-2xl border-border bg-background py-5 shadow-none", className)}>
+      <CardHeader className="gap-1 px-5">
+        <CardTitle className="font-display text-[15px] font-bold tracking-[-0.01em]">
+          {title}
+        </CardTitle>
+        {description && (
+          <CardDescription className="text-xs leading-[1.4]">{description}</CardDescription>
         )}
-      </div>
-      <div className="text-[11px] leading-[1.4] text-muted-foreground/75">{hint}</div>
-    </div>
+        {action && <CardAction>{action}</CardAction>}
+      </CardHeader>
+      <CardContent className="px-5">{children}</CardContent>
+      {footer && (
+        <CardFooter className="px-5 text-[11px] leading-[1.45] text-muted-foreground">
+          {footer}
+        </CardFooter>
+      )}
+    </Card>
   );
 }
-
-function ReportCard({ title, caption, children }: {
-  title: string; caption: string; children: React.ReactNode;
-}) {
-  return (
-    <div className="rounded-[14px] border border-border bg-background px-4 pt-4 pb-[18px]">
-      <div className="font-display text-[15px] font-bold tracking-[-0.01em] text-foreground">
-        {title}
-      </div>
-      <div className="mt-[3px] mb-3.5 text-[11px] leading-[1.4] text-muted-foreground/80">
-        {caption}
-      </div>
-      {children}
-    </div>
-  );
-}
-
-/** The Recent-entries grid. The category column is the one that can go: it is
- *  already encoded in the amount pill's colour, so dropping it on narrow
- *  screens costs nothing and keeps the note from truncating to nothing. */
-const ROW = "grid grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-2.5 py-[9px] text-[13px] min-[560px]:grid-cols-[minmax(0,1fr)_80px_108px_84px]";
-const CAT_CELL = "hidden min-[560px]:block";
 
 export function ReportSheet({
   open, report, period, onPeriodChange, periodSubtitle, fmt, currency,
@@ -97,10 +126,10 @@ export function ReportSheet({
   const {
     count, countDelta, total, avg,
     budget, budgetMonths, budgetUsedPct, remaining,
-    byCategory, bySize, recent, activeDays, months,
+    byCategory, bySize, recent, activeDays, months, trend, trendUnit,
   } = data;
 
-  // The delta line under "Entries". Reads as prose rather than a signed number
+  // The delta line under the total. Reads as prose rather than a signed number
   // because "+3" alone doesn't say more or less than *what*.
   const previousLabel = period === "month" ? "last month" : period === "year" ? "last year" : "last period";
   const deltaHint =
@@ -112,12 +141,39 @@ export function ReportSheet({
   // ever given a budget — otherwise the percentage silently measures against a
   // smaller denominator than the header implies.
   const budgetHint =
-    budget === null           ? "No budget set for this period"
+    budget === null                ? "No budget set for this period"
     : budgetMonths < months.length ? `of ${fmt(budget)} across ${budgetMonths} of ${months.length} months`
     : `of ${fmt(budget)} budget`;
 
   const isOver = remaining !== null && remaining < 0;
-  const maxCategoryTotal = byCategory.length > 0 ? byCategory[0].total : 0;
+  const usedPct = budgetUsedPct === null ? 0 : Math.round(budgetUsedPct);
+  const budgetColor =
+    isOver        ? "var(--ui-destructive)"
+    : usedPct >= 80 ? SIZE_BANDS[2].color
+    : "var(--ui-primary)";
+
+  const trendLabel = (key: string) => {
+    if (trendUnit === "day") return formatDisplayDate(key);
+    return `${MONTHS[Number(key.slice(5, 7)) - 1]} ${key.slice(0, 4)}`;
+  };
+  const trendTick = (key: string) =>
+    trendUnit === "day" ? String(Number(key.slice(8))) : MONTHS[Number(key.slice(5, 7)) - 1];
+
+  const trendTooltip = (
+    <ChartTooltipContent
+      indicator="line"
+      labelFormatter={(_, payload) => trendLabel(String(payload?.[0]?.payload?.key ?? ""))}
+      formatter={(value) => (
+        <span className="flex w-full justify-between gap-4">
+          <span className="text-muted-foreground">Spent</span>
+          <span className="font-numeric font-semibold text-foreground">{fmt(Number(value))}</span>
+        </span>
+      )} />
+  );
+
+  const pieData = byCategory.map((s) => ({ id: s.id, total: s.total, fill: `var(--color-${s.id})` }));
+  const sizeData = bySize.map(({ band, count: c }) => ({ id: band.id, label: band.label, count: c }));
+  const top = byCategory[0];
 
   return (
     <Sheet open={open} onOpenChange={(next) => { if (!next) onClose(); }}>
@@ -126,9 +182,7 @@ export function ReportSheet({
         showCloseButton={false}
         className="inset-0 h-dvh max-h-dvh gap-0 rounded-none border-0 bg-card p-0 font-sans sm:max-w-none">
 
-        {/* ── Title block — fixed at the top, outside the scroll container, so */}
-        {/* the report always says what it is and the close button stays        */}
-        {/* reachable however far down the body is scrolled.                    */}
+        {/* ── Title block — fixed at the top, outside the scroll container. ── */}
         <div className="shrink-0 border-b border-border/70 px-5 pt-[calc(env(safe-area-inset-top)+1.25rem)] pb-3.5">
           <div className="mx-auto flex w-full max-w-[620px] items-start justify-between gap-3">
             <div className="min-w-0">
@@ -151,197 +205,266 @@ export function ReportSheet({
 
         {/* ── Scrolling body ── */}
         <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-5 pt-4 pb-[calc(env(safe-area-inset-bottom)+3rem)]">
-          <div className="mx-auto w-full max-w-[620px]">
+          <div className="mx-auto flex w-full max-w-[620px] flex-col gap-3">
 
-            {/* Native select, restyled: the platform picker is a better control */}
-            {/* on iOS than anything rebuilt in JS, and it is keyboard-accessible */}
-            {/* for free. The chevron is a sibling icon, not the select's own     */}
-            {/* indicator — appearance-none suppresses the platform arrow, and    */}
-            {/* drawing it back with lucide keeps it the same glyph and stroke as */}
-            {/* every other chevron in the app. pointer-events-none so the click  */}
-            {/* still opens the native picker.                                    */}
-            <div className="relative mb-4 inline-flex items-center">
-              <select
+            <Select value={period} onValueChange={(v) => onPeriodChange(v as ReportPeriod)}>
+              <SelectTrigger
                 aria-label="Report period"
-                value={period}
-                onChange={(e) => onPeriodChange(e.target.value as ReportPeriod)}
-                className="cursor-pointer appearance-none rounded-[10px] border border-input bg-background py-[9px] pr-8 pl-3 text-[13px] font-semibold text-secondary-foreground">
+                className="w-[160px] rounded-[10px] bg-background font-semibold text-secondary-foreground">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
                 {(Object.keys(PERIOD_LABELS) as ReportPeriod[]).map((p) => (
-                  <option key={p} value={p}>{PERIOD_LABELS[p]}</option>
+                  <SelectItem key={p} value={p}>{PERIOD_LABELS[p]}</SelectItem>
                 ))}
-              </select>
-              <ChevronDown
-                size={14} strokeWidth={2.5} aria-hidden="true"
-                className="pointer-events-none absolute right-[11px] text-muted-foreground" />
-            </div>
+              </SelectContent>
+            </Select>
 
             {count === 0 ? (
-              <div className="rounded-[14px] border border-border bg-background px-5 py-10 text-center">
-                <Receipt size={28} strokeWidth={1.6} className="mx-auto mb-3 text-ghost" />
-                <div className="text-sm font-semibold text-muted-foreground">
-                  Nothing to report yet
-                </div>
-                <div className="mt-1.5 text-xs leading-[1.5] text-ghost">
+              <Card className="items-center gap-1.5 rounded-2xl bg-background px-5 py-10 text-center shadow-none">
+                <Receipt size={28} strokeWidth={1.6} className="mb-1.5 text-ghost" />
+                <div className="text-sm font-semibold text-muted-foreground">Nothing to report yet</div>
+                <div className="text-xs leading-[1.5] text-ghost">
                   No entries in {PERIOD_LABELS[period].toLowerCase()}. Try a wider period.
                 </div>
-              </div>
+              </Card>
             ) : (
-              <div className="flex flex-col gap-3">
-
-                {/* ── Stat tiles — 2×2 on mobile, one row of 4 once there is width ── */}
-                <div className="grid grid-cols-2 gap-2.5 min-[560px]:grid-cols-4">
-                  <StatTile
-                    label="Entries"
-                    value={String(count)}
-                    hint={deltaHint}
-                  />
-                  <StatTile
-                    label="Total spent"
-                    value={fmt(total)}
-                    hint={`avg ${fmt(avg)} each`}
-                  />
-                  <StatTile
-                    label="Budget used"
-                    value={budgetUsedPct === null ? "—" : String(Math.round(budgetUsedPct))}
-                    unit={budgetUsedPct === null ? undefined : "%"}
-                    hint={budgetHint}
-                  />
-                  <StatTile
-                    label={isOver ? "Over budget" : "Remaining"}
-                    value={remaining === null ? "—" : fmt(Math.abs(remaining))}
-                    hint={
-                      remaining === null ? "Set a budget to track this"
-                      : isOver          ? "past your limit for this period"
-                      : "left to spend this period"
-                    }
-                  />
-                </div>
-
-                {/* ── Spending by category ── */}
-                <ReportCard
-                  title="Spending by category"
-                  caption="Most-spent first. Pick one to see those entries.">
-                  {byCategory.map((slice, i) => {
-                    const meta = CATEGORIES.find((c) => c.id === slice.id)!;
-                    // Bars are scaled against the largest category, not the total,
-                    // so the shape of the month stays legible when one category
-                    // dominates and the rest would otherwise flatten to nothing.
-                    const width = maxCategoryTotal > 0 ? (slice.total / maxCategoryTotal) * 100 : 0;
-                    return (
-                      <Button
-                        key={slice.id}
-                        variant="ghost"
-                        onClick={() => onPickCategory(slice.id)}
-                        aria-label={`${meta.label}, ${fmt(slice.total)} across ${slice.count} ${slice.count === 1 ? "entry" : "entries"}. Show these entries.`}
-                        className={cn(
-                          "h-auto w-full justify-start gap-2.5 rounded-md px-0 py-1.5",
-                          i < byCategory.length - 1 && "mb-1.5",
-                        )}>
-                        <span
-                          className="size-2.5 shrink-0 rounded-[3px]"
-                          style={{ background: meta.color }} />
-                        <span className="w-[68px] shrink-0 text-left text-[13px] font-semibold text-secondary-foreground">
-                          {meta.label}
-                        </span>
-                        <span className="h-2 min-w-6 flex-1 overflow-hidden rounded-full bg-secondary">
-                          <motion.span
-                            initial={{ width: 0 }} animate={{ width: `${width}%` }}
-                            transition={{ duration: 0.45, delay: i * 0.04, ease: [0.4, 0, 0.2, 1] }}
-                            className="block h-full rounded-full"
-                            style={{ background: meta.color }} />
-                        </span>
-                        <span
-                          className="min-w-[62px] shrink-0 text-right font-numeric text-[13px] font-bold"
-                          style={{ color: meta.color }}>
-                          {fmt(slice.total)}
-                        </span>
-                      </Button>
-                    );
-                  })}
-                  <div className="mt-2.5 text-[11px] leading-[1.45] text-muted-foreground/70">
-                    {(() => {
-                      const top = byCategory[0];
-                      const meta = CATEGORIES.find((c) => c.id === top.id)!;
-                      return `${meta.label} leads at ${Math.round(top.share)}% of spend — ${top.count} ${top.count === 1 ? "entry" : "entries"}, avg ${fmt(top.avg)}.`;
-                    })()}
-                  </div>
-                </ReportCard>
-
-                {/* ── By size ── */}
-                <ReportCard
-                  title="By size"
-                  caption={`Every entry counted once — these add up to ${count}.`}>
-                  {bySize.map(({ band, count: bandCount }, i) => (
-                    <div
-                      key={band.id}
-                      className={cn(
-                        "flex items-center gap-2.5 py-[5px]",
-                        i < bySize.length - 1 && "mb-0.5",
-                      )}>
-                      <span
-                        className={cn("size-[9px] shrink-0 rounded-full", bandCount === 0 && "opacity-30")}
-                        style={{ background: band.color }} />
-                      <span className={cn(
-                        "flex-1 text-[13px] font-medium",
-                        bandCount > 0 ? "text-secondary-foreground" : "text-muted-foreground",
-                      )}>
-                        {band.label}
-                      </span>
-                      <span className={cn(
-                        "font-numeric text-[13px] font-bold",
-                        bandCount > 0 ? "text-foreground" : "text-ghost",
-                      )}>
-                        {bandCount}
-                      </span>
+              <>
+                {/* ── Total spent + trend (Area chart – gradient) ── */}
+                <Card className="gap-3 rounded-2xl border-border bg-background pt-5 pb-3 shadow-none">
+                  <CardHeader className="gap-1 px-5">
+                    <CardDescription className="text-xs">Total spent</CardDescription>
+                    <CardTitle className="font-display text-[32px] leading-none font-extrabold tracking-[-0.03em] tabular-nums">
+                      {fmt(total)}
+                    </CardTitle>
+                    <CardAction>
+                      <Badge variant="secondary" className="font-numeric">
+                        {count} {count === 1 ? "entry" : "entries"}
+                      </Badge>
+                    </CardAction>
+                    <div className="text-[11px] text-muted-foreground">
+                      avg {fmt(avg)} each · {deltaHint}
                     </div>
-                  ))}
-                  {currency === "KHR" && (
-                    <div className="mt-2.5 text-[11px] text-muted-foreground/70">
-                      Bands are USD — the ledger&apos;s base currency.
+                  </CardHeader>
+                  <CardContent className="px-2">
+                    <ChartContainer config={TREND_CONFIG} className="aspect-auto h-[170px] w-full">
+                      {/* A day's spend is spiky — a smoothed area would dip below */}
+                      {/* zero between entries, so days are bars and months a curve. */}
+                      {trendUnit === "day" ? (
+                        <BarChart data={trend} margin={{ left: 12, right: 12, top: 8 }}>
+                          <CartesianGrid vertical={false} />
+                          <XAxis
+                            dataKey="key" tickLine={false} axisLine={false} tickMargin={8}
+                            minTickGap={24} tickFormatter={trendTick} />
+                          <ChartTooltip cursor={false} content={trendTooltip} />
+                          <Bar dataKey="total" fill="var(--color-total)" radius={3} />
+                        </BarChart>
+                      ) : (
+                        <AreaChart data={trend} margin={{ left: 12, right: 12, top: 8 }}>
+                          <defs>
+                            <linearGradient id="report-trend-fill" x1="0" y1="0" x2="0" y2="1">
+                              <stop offset="5%" stopColor="var(--color-total)" stopOpacity={0.45} />
+                              <stop offset="95%" stopColor="var(--color-total)" stopOpacity={0.02} />
+                            </linearGradient>
+                          </defs>
+                          <CartesianGrid vertical={false} />
+                          <XAxis
+                            dataKey="key" tickLine={false} axisLine={false} tickMargin={8}
+                            minTickGap={24} tickFormatter={trendTick} />
+                          <ChartTooltip cursor={false} content={trendTooltip} />
+                          <Area
+                            dataKey="total" type="monotone" fill="url(#report-trend-fill)"
+                            stroke="var(--color-total)" strokeWidth={2} />
+                        </AreaChart>
+                      )}
+                    </ChartContainer>
+                  </CardContent>
+                </Card>
+
+                {/* ── Budget (Radial chart – text) ── */}
+                <SectionCard
+                  title="Budget"
+                  description={budgetHint}>
+                  {budget === null ? (
+                    <div className="text-xs text-muted-foreground">
+                      Set a monthly budget on the dashboard to track it here.
+                    </div>
+                  ) : (
+                    <div className="flex items-center gap-5">
+                      <ChartContainer
+                        config={{ used: { label: "Used", color: budgetColor } }}
+                        className="aspect-square h-[132px] shrink-0">
+                        <RadialBarChart
+                          data={[{ name: "used", value: Math.min(usedPct, 100), fill: "var(--color-used)" }]}
+                          startAngle={90} endAngle={-270} innerRadius={50} outerRadius={66}>
+                          <PolarAngleAxis type="number" domain={[0, 100]} tick={false} axisLine={false} />
+                          <RadialBar dataKey="value" background cornerRadius={10} />
+                          <text x="50%" y="50%" textAnchor="middle" dominantBaseline="middle">
+                            <tspan x="50%" dy="-0.2em" className="fill-foreground font-display text-2xl font-extrabold">
+                              {usedPct}%
+                            </tspan>
+                            <tspan x="50%" dy="1.6em" className="fill-muted-foreground text-[11px]">
+                              used
+                            </tspan>
+                          </text>
+                        </RadialBarChart>
+                      </ChartContainer>
+                      <div className="flex min-w-0 flex-col gap-1">
+                        <div className="text-xs text-muted-foreground">
+                          {isOver ? "Over budget" : "Remaining"}
+                        </div>
+                        <div className={cn(
+                          "font-display text-2xl leading-none font-extrabold tracking-[-0.03em] tabular-nums",
+                          isOver ? "text-destructive" : "text-foreground",
+                        )}>
+                          {fmt(Math.abs(remaining!))}
+                        </div>
+                        <div className="text-[11px] text-muted-foreground">
+                          {isOver ? "past your limit for this period" : "left to spend this period"}
+                        </div>
+                      </div>
                     </div>
                   )}
-                </ReportCard>
+                </SectionCard>
+
+                {/* ── Spending by category (Pie chart – donut with text) ── */}
+                <SectionCard
+                  title="Spending by category"
+                  description="Most-spent first. Pick one to see those entries."
+                  footer={top && `${categoryMeta(top.id).label} leads at ${Math.round(top.share)}% of spend — ${top.count} ${top.count === 1 ? "entry" : "entries"}, avg ${fmt(top.avg)}.`}>
+                  <ChartContainer config={CATEGORY_CONFIG} className="mx-auto aspect-square h-[200px]">
+                    <PieChart>
+                      <ChartTooltip
+                        cursor={false}
+                        content={
+                          <ChartTooltipContent
+                            hideLabel nameKey="id"
+                            formatter={(value, _name, item) => (
+                              <span className="flex w-full justify-between gap-4">
+                                <span className="text-muted-foreground">
+                                  {categoryMeta(item.payload.id).label}
+                                </span>
+                                <span className="font-numeric font-semibold text-foreground">{fmt(Number(value))}</span>
+                              </span>
+                            )} />
+                        } />
+                      <Pie
+                        data={pieData} dataKey="total" nameKey="id"
+                        innerRadius={62} outerRadius={90} paddingAngle={2} strokeWidth={0}>
+                        {pieData.map((d) => <Cell key={d.id} fill={d.fill} />)}
+                        <Label
+                          content={({ viewBox }) => {
+                            if (!viewBox || !("cx" in viewBox)) return null;
+                            return (
+                              <text x={viewBox.cx} y={viewBox.cy} textAnchor="middle" dominantBaseline="middle">
+                                <tspan x={viewBox.cx} y={viewBox.cy} className="fill-foreground font-display text-xl font-extrabold">
+                                  {fmt(total)}
+                                </tspan>
+                                <tspan x={viewBox.cx} y={(viewBox.cy ?? 0) + 20} className="fill-muted-foreground text-[11px]">
+                                  {byCategory.length} {byCategory.length === 1 ? "category" : "categories"}
+                                </tspan>
+                              </text>
+                            );
+                          }} />
+                      </Pie>
+                    </PieChart>
+                  </ChartContainer>
+
+                  <div className="mt-3 flex flex-col">
+                    {byCategory.map((slice) => {
+                      const meta = categoryMeta(slice.id);
+                      return (
+                        <Button
+                          key={slice.id}
+                          variant="ghost"
+                          onClick={() => onPickCategory(slice.id)}
+                          aria-label={`${meta.label}, ${fmt(slice.total)} across ${slice.count} ${slice.count === 1 ? "entry" : "entries"}. Show these entries.`}
+                          style={swatch(meta.color)}
+                          className="h-auto w-full justify-start gap-2.5 rounded-lg px-2 py-2">
+                          <span className="size-2.5 shrink-0 rounded-[3px] bg-(--swatch)" />
+                          <span className="flex-1 text-left text-[13px] font-semibold text-secondary-foreground">
+                            {meta.label}
+                          </span>
+                          <span className="font-numeric text-[11px] text-muted-foreground">
+                            {Math.round(slice.share)}%
+                          </span>
+                          <span className="min-w-[64px] text-right font-numeric text-[13px] font-bold text-(--swatch)">
+                            {fmt(slice.total)}
+                          </span>
+                          <ChevronRight className="size-3.5 text-ghost" />
+                        </Button>
+                      );
+                    })}
+                  </div>
+                </SectionCard>
+
+                {/* ── By size (Bar chart – label) ── */}
+                <SectionCard
+                  title="By size"
+                  description={`Every entry counted once — these add up to ${count}.`}
+                  footer={currency === "KHR" ? "Bands are USD — the ledger's base currency." : undefined}>
+                  <ChartContainer config={SIZE_CONFIG} className="aspect-auto h-[170px] w-full">
+                    <BarChart data={sizeData} margin={{ top: 22 }}>
+                      <CartesianGrid vertical={false} />
+                      <XAxis dataKey="label" tickLine={false} axisLine={false} tickMargin={8} />
+                      <ChartTooltip
+                        cursor={false}
+                        content={<ChartTooltipContent hideLabel nameKey="id" />} />
+                      <Bar dataKey="count" radius={8}>
+                        {sizeData.map((d) => <Cell key={d.id} fill={`var(--color-${d.id})`} />)}
+                        <LabelList dataKey="count" position="top" offset={8} className="fill-foreground font-numeric text-xs font-bold" />
+                      </Bar>
+                    </BarChart>
+                  </ChartContainer>
+                </SectionCard>
 
                 {/* ── Recent entries ── */}
-                <ReportCard
+                <SectionCard
                   title="Recent entries"
-                  caption={count > recent.length ? `Newest ${recent.length} of ${count}.` : "Newest first."}>
-                  <div className={cn(
-                    ROW,
-                    "border-b border-border pt-0 pb-2 text-[10px] font-semibold tracking-[0.07em] text-muted-foreground/60 uppercase",
-                  )}>
-                    <span>Note</span>
-                    <span className={CAT_CELL}>Category</span>
-                    <span>When</span>
-                    <span className="text-right">Amount</span>
-                  </div>
-                  {recent.map((tx, i) => {
-                    const meta = CATEGORIES.find((c) => c.id === tx.category)!;
-                    return (
-                      <div key={tx.id} className={cn(ROW, i > 0 && "border-t border-border/60")}>
-                        <span className="truncate font-semibold text-foreground">
-                          {tx.note || meta.label}
-                        </span>
-                        <span className={cn(CAT_CELL, "text-muted-foreground")}>{meta.label}</span>
-                        <span className="font-numeric text-xs text-muted-foreground">
-                          {formatDisplayDate(dayFromIso(tx.date))}
-                        </span>
-                        <span className="text-right">
-                          <span
-                            className="rounded-full border px-2.5 py-[3px] font-numeric text-[11.5px] font-bold whitespace-nowrap"
-                            style={{
-                              background: `${meta.color}1f`,
-                              borderColor: `${meta.color}40`,
-                              color: meta.color,
-                            }}>
-                            {fmt(tx.amountUSD)}
-                          </span>
-                        </span>
-                      </div>
-                    );
-                  })}
-                </ReportCard>
-              </div>
+                  description={count > recent.length ? `Newest ${recent.length} of ${count}.` : "Newest first."}>
+                  <Table className="text-[13px]">
+                    <TableHeader>
+                      <TableRow className="hover:bg-transparent">
+                        <TableHead className="h-8 px-0 text-[10px] tracking-[0.07em] text-muted-foreground uppercase">Note</TableHead>
+                        <TableHead className="hidden h-8 text-[10px] tracking-[0.07em] text-muted-foreground uppercase min-[560px]:table-cell">Category</TableHead>
+                        <TableHead className="h-8 text-[10px] tracking-[0.07em] text-muted-foreground uppercase">When</TableHead>
+                        <TableHead className="h-8 px-0 text-right text-[10px] tracking-[0.07em] text-muted-foreground uppercase">Amount</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {recent.map((tx) => {
+                        const meta = categoryMeta(tx.category);
+                        return (
+                          <TableRow key={tx.id} className="hover:bg-transparent">
+                            <TableCell className="max-w-0 truncate px-0 font-semibold text-foreground">
+                              {tx.note || meta.label}
+                            </TableCell>
+                            <TableCell className="hidden text-muted-foreground min-[560px]:table-cell">{meta.label}</TableCell>
+                            <TableCell className="w-[96px] font-numeric text-xs text-muted-foreground">
+                              <div>{formatDisplayDate(dayFromIso(tx.date))}</div>
+                              {/* Same rule as the dashboard row: the picked time, */}
+                              {/* else when the entry was created, else nothing. */}
+                              {(tx.time || tx.createdAt) && (
+                                <div className="mt-0.5 text-[11px] text-muted-foreground/70">
+                                  {tx.time ? formatTimeOfDay(tx.time) : formatDisplayTime(tx.createdAt!)}
+                                </div>
+                              )}
+                            </TableCell>
+                            <TableCell className="w-[88px] px-0 text-right">
+                              <Badge
+                                variant="outline"
+                                style={swatch(meta.color)}
+                                className="border-(--swatch)/25 bg-(--swatch)/12 font-numeric font-bold text-(--swatch)">
+                                {fmt(tx.amountUSD)}
+                              </Badge>
+                            </TableCell>
+                          </TableRow>
+                        );
+                      })}
+                    </TableBody>
+                  </Table>
+                </SectionCard>
+              </>
             )}
           </div>
         </div>

@@ -11,7 +11,7 @@
  */
 
 import type { CategoryId, Transaction } from "@/lib/types";
-import { monthKeyFromIso, dayFromIso } from "@/lib/calendar-day";
+import { monthKeyFromIso, dayFromIso, todayDay } from "@/lib/calendar-day";
 import { makeByNewest } from "@/lib/tx-order";
 
 const pin2 = (v: number) => Math.round(v * 100) / 100;
@@ -144,6 +144,15 @@ export interface BandSlice {
   count: number;
 }
 
+export interface TrendPoint {
+  /** "YYYY-MM-DD" for a daily series, "YYYY-MM" for a monthly one. */
+  key: string;
+  /** null for a slot still in the future, so the chart leaves a gap there
+   *  instead of drawing a fall to zero that hasn't happened. */
+  total: number | null;
+  count: number;
+}
+
 export interface ReportData {
   /** Months covered, ascending. */
   months: string[];
@@ -175,6 +184,13 @@ export interface ReportData {
   byCategory: CategorySlice[];
   bySize: BandSlice[];
   recent: Transaction[];
+  /**
+   * Spend over time for the trend chart. One point per day for a single-month
+   * period (a month of monthly points is one bar), one per month otherwise.
+   * Every slot is present, empty ones as zero, so the x-axis never skips.
+   */
+  trend: TrendPoint[];
+  trendUnit: "day" | "month";
 
   /** Distinct calendar days with at least one entry. */
   activeDays: number;
@@ -182,11 +198,42 @@ export interface ReportData {
 
 const RECENT_LIMIT = 5;
 
+/** Days in a month, from the key alone — same no-Date rule as addMonths. */
+const daysInMonth = (key: string): number => {
+  const { year, month } = parseMonth(key);
+  if (month === 2) return (year % 4 === 0 && year % 100 !== 0) || year % 400 === 0 ? 29 : 28;
+  return [4, 6, 9, 11].includes(month) ? 30 : 31;
+};
+
+const buildTrend = (
+  txs: Transaction[],
+  months: string[],
+  today: string,
+): Pick<ReportData, "trend" | "trendUnit"> => {
+  const trendUnit = months.length === 1 ? "day" : "month";
+  const keys = trendUnit === "day"
+    ? Array.from({ length: daysInMonth(months[0]) }, (_, i) => `${months[0]}-${pad2(i + 1)}`)
+    : months;
+  const slots = new Map(keys.map((key) => [key, { key, total: 0, count: 0 }]));
+  for (const t of txs) {
+    const slot = slots.get(trendUnit === "day" ? dayFromIso(t.date) : monthKeyFromIso(t.date));
+    if (!slot) continue;
+    slot.total += t.amountUSD;
+    slot.count += 1;
+  }
+  const now = trendUnit === "day" ? today : today.slice(0, 7);
+  return {
+    trend: Array.from(slots.values(), (p) => ({ ...p, total: p.key > now ? null : pin2(p.total) })),
+    trendUnit,
+  };
+};
+
 export const buildReport = (
   transactions: Transaction[],
   monthlyBalances: Record<string, number>,
   period: ReportPeriod,
   anchorMonth: string,
+  today: string = todayDay(),
 ): ReportData => {
   const ledgerMonths = Array.from(new Set(transactions.map((t) => monthKeyFromIso(t.date)))).sort();
 
@@ -250,6 +297,7 @@ export const buildReport = (
     budget, budgetMonths: budgeted.length, budgetUsedPct, remaining,
     byCategory, bySize,
     recent: txs.slice(0, RECENT_LIMIT),
+    ...buildTrend(txs, months, today),
     activeDays,
   };
 };
