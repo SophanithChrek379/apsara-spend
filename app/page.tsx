@@ -23,6 +23,8 @@ import { CATEGORIES, MISC_CATEGORY } from "@/lib/categories";
 import { ReportSheet } from "@/components/report/ReportSheet";
 import { OverlayPickerField } from "@/components/transactions/OverlayPickerField";
 import { DayHeader } from "@/components/transactions/DayHeader";
+import { DateFilterFab, DateFilterSheet, RangeTotal, resolveDateFilter, type DateFilter } from "@/components/transactions/DateFilter";
+import { formatRange, inRange } from "@/lib/date-range";
 import { AccountSheet, type AuthMode } from "@/components/account/AccountSheet";
 import { GoogleMark } from "@/components/account/GoogleMark";
 import {
@@ -1056,6 +1058,10 @@ export default function ApsaraSpendPage() {
   const [catFilter,        setCatFilter]        = useState<{ month: string; cat: CategoryId | "all" }>(
     () => ({ month: todayMonthKey(), cat: "all" })
   );
+  // Date filter — stamped with its month exactly like catFilter, so changing
+  // month drops it back to Default with no reset to remember. See `dateRange`.
+  const [dateFilter,       setDateFilter]       = useState<{ month: string; filter: DateFilter } | null>(null);
+  const [showDateFilter,   setShowDateFilter]   = useState(false);
   const [showFilterMenu,   setShowFilterMenu]   = useState(false);
   // L — Swipe-to-delete: openSwipeId tracks which row is snapped open.
   // confirmDeleteTx holds the transaction pending confirmation.
@@ -1297,6 +1303,25 @@ export default function ApsaraSpendPage() {
     [data.transactions, selectedMonth]
   );
 
+  // The date filter in force for the month on screen, as concrete days (null
+  // = Default). "This week" resolves against today on every render, so it
+  // never goes stale across midnight.
+  const dateRange = resolveDateFilter(
+    dateFilter?.month === selectedMonth ? dateFilter.filter : null,
+    localDateString(), selectedMonth,
+  );
+  const rangeFrom = dateRange?.from, rangeTo = dateRange?.to;
+
+  // The month narrowed by the date filter. Feeds the list, its category chips
+  // and the day/range totals — never the Total Spend card or the budget,
+  // which are monthly by definition.
+  const rangeTxs = useMemo(() =>
+    rangeFrom && rangeTo
+      ? monthTxs.filter((t) => inRange(dayFromIso(t.date), { from: rangeFrom, to: rangeTo }))
+      : monthTxs,
+    [monthTxs, rangeFrom, rangeTo]
+  );
+
   // L1 — the filter actually in force, derived rather than stored.
   //
   // Two ways a stored category stops describing anything on screen, both of
@@ -1308,7 +1333,9 @@ export default function ApsaraSpendPage() {
   const filterCategory: CategoryId | "all" =
     catFilter.month === selectedMonth &&
     catFilter.cat !== "all" &&
-    monthTxs.some((t) => t.category === catFilter.cat)
+    // rangeTxs, not monthTxs: a category with nothing inside the date range
+    // has no chip, so it can't stay selected either.
+    rangeTxs.some((t) => t.category === catFilter.cat)
       ? catFilter.cat
       : "all";
 
@@ -1386,6 +1413,9 @@ export default function ApsaraSpendPage() {
       return;
     }
     setShowReport(false);
+    // The report counts the whole month; a date filter could hide every entry
+    // of this category and leave the tap selecting nothing.
+    setDateFilter(null);
     setFilterCategory(cat);
   }, [monthTxs, selectedMonth, setFilterCategory, showToast]);
 
@@ -1467,7 +1497,7 @@ export default function ApsaraSpendPage() {
   }, [openSwipeId]);
 
   // Reset visible count when month or filter changes so we always start at top
-  useEffect(() => { setVisibleCount(10); }, [selectedMonth, filterCategory]);
+  useEffect(() => { setVisibleCount(10); }, [selectedMonth, filterCategory, rangeFrom, rangeTo]);
 
   // Clear the stored filter once the month has actually changed, so coming back
   // to July later opens on All rather than resurrecting the filter that was on
@@ -1821,9 +1851,9 @@ export default function ApsaraSpendPage() {
   const activeCat   = CATEGORIES.find((c) => c.id === filterCategory);
   const filteredTxs = useMemo(() =>
     filterCategory === "all"
-      ? monthTxs
-      : monthTxs.filter((t) => t.category === filterCategory),
-    [monthTxs, filterCategory]
+      ? rangeTxs
+      : rangeTxs.filter((t) => t.category === filterCategory),
+    [rangeTxs, filterCategory]
   );
 
   // Newest first, within a day by the clock time each row prints. See
@@ -1897,7 +1927,7 @@ export default function ApsaraSpendPage() {
           All
         </button>
         {/* Category chips — only for categories with entries */}
-        {CATEGORIES.filter(c => monthTxs.some(t => t.category === c.id)).map(c => {
+        {CATEGORIES.filter(c => rangeTxs.some(t => t.category === c.id)).map(c => {
           const active = filterCategory === c.id;
           return (
             <button key={c.id}
@@ -1922,7 +1952,10 @@ export default function ApsaraSpendPage() {
       {/* ── Transaction rows (filtered) ── */}
       {visibleTxs.length === 0 ? (
         <div style={{ textAlign: "center", padding: "24px 0", color: "var(--color-text-lo)", fontSize: 13, fontFamily: "var(--font-body)" }}>
-          {activeCat ? `No ${activeCat.label} entries this month` : "No entries this month"}
+          {(() => {
+            const when = dateRange ? formatRange(dateRange) : "this month";
+            return activeCat ? `No ${activeCat.label} entries ${dateRange ? "on " : ""}${when}` : `No entries ${dateRange ? "on " : ""}${when}`;
+          })()}
         </div>
       ) : (() => {
         const visible = visibleTxs;
@@ -1938,6 +1971,13 @@ export default function ApsaraSpendPage() {
         const seenDates = new Set<string>();
         return (
           <>
+            {dateRange && (
+              <RangeTotal
+                range={dateRange}
+                total={fmt(pin2(sortedTxs.reduce((s, t) => s + t.amountUSD, 0)))}
+                count={sortedTxs.length}
+              />
+            )}
             {visible.map((tx, i) => {
             // Fallback by id, not index: a row can carry a category this build
             // doesn't know (synced from a newer client, or hand-edited), and
@@ -2592,7 +2632,7 @@ export default function ApsaraSpendPage() {
           userSelect: "none",
         }}
       >
-        <div className="main-scroll" style={{ position: "relative", zIndex: 1, paddingBottom: "calc(160px + env(safe-area-inset-bottom))" }}>
+        <div className="main-scroll" style={{ position: "relative", zIndex: 1, paddingBottom: hasData ? "calc(224px + env(safe-area-inset-bottom))" : "calc(160px + env(safe-area-inset-bottom))" }}>
 
           {/* ════ STICKY HEADER — app title + month navigation ════ */}
           <div className="sticky-header">
@@ -2807,8 +2847,21 @@ export default function ApsaraSpendPage() {
           )}
           </motion.div>
         </div>{/* end main-scroll */}
-        {isLoaded && hasMonthBudget && !fabDisabled && (
+        {isLoaded && ((hasMonthBudget && !fabDisabled) || hasData) && (
         <div className="fab-footer">
+          {/* Date filter quick action — stacked 16px above Add Expense, the
+              spacing Material uses between FABs. Shown whenever there is a
+              list to narrow, even when Add Expense itself is gated off. */}
+          {hasData && (
+            <div className="mb-4">
+              <DateFilterFab
+                range={dateRange}
+                onOpen={() => setShowDateFilter(true)}
+                onReset={() => setDateFilter(null)}
+              />
+            </div>
+          )}
+          {hasMonthBudget && !fabDisabled && (
           <motion.button
             whileTap={{ scale: 0.94 }}
             whileHover={{ scale: 1.04 }}
@@ -2834,8 +2887,20 @@ export default function ApsaraSpendPage() {
             <Plus size={18} color="var(--accent-text)" strokeWidth={3} />
             Add Expense
           </motion.button>
+          )}
         </div>
         )}{/* end FAB gate */}
+
+        <DateFilterSheet
+          open={showDateFilter}
+          onOpenChange={setShowDateFilter}
+          value={dateFilter?.month === selectedMonth ? dateFilter.filter : null}
+          today={localDateString()}
+          monthKey={selectedMonth}
+          monthName={MONTH_FULL[parseMonthKey(selectedMonth).month - 1]}
+          onApply={(filter) => { setDateFilter({ month: selectedMonth, filter }); setShowDateFilter(false); }}
+          onReset={() => { setDateFilter(null); setShowDateFilter(false); }}
+        />
 
         {/* ════ MODALS ════ */}
         <AnimatePresence>
