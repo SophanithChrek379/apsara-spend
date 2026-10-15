@@ -22,6 +22,7 @@ import { makeByNewest } from "@/lib/tx-order";
 import { CATEGORIES, MISC_CATEGORY } from "@/lib/categories";
 import { ReportSheet } from "@/components/report/ReportSheet";
 import { OverlayPickerField } from "@/components/transactions/OverlayPickerField";
+import { DayHeader } from "@/components/transactions/DayHeader";
 import { AccountSheet, type AuthMode } from "@/components/account/AccountSheet";
 import { GoogleMark } from "@/components/account/GoogleMark";
 import {
@@ -1832,6 +1833,21 @@ export default function ApsaraSpendPage() {
     [filteredTxs]
   );
 
+  // Per-day total + count over the whole filtered month, not just the page of
+  // rows rendered so far — otherwise a day split by infinite scroll would show
+  // a partial sum until the rest of it loaded.
+  const dayTotals = useMemo(() => {
+    const m = new Map<string, { total: number; count: number }>();
+    for (const t of sortedTxs) {
+      const d = dayFromIso(t.date);
+      const e = m.get(d) ?? { total: 0, count: 0 };
+      e.total = pin2(e.total + t.amountUSD);
+      e.count += 1;
+      m.set(d, e);
+    }
+    return m;
+  }, [sortedTxs]);
+
   const visibleTxs  = sortedTxs.slice(0, visibleCount);
   const hasMoreRows = visibleCount < sortedTxs.length;
 
@@ -1932,16 +1948,23 @@ export default function ApsaraSpendPage() {
             const isFirst  = !seenDates.has(txDate);
             if (isFirst) seenDates.add(txDate);
             const isLast   = i === visible.length - 1 && !hasMore;
+            // The next day's header band already separates the groups, so the
+            // last row of a day drops its divider rather than doubling it.
+            const endsDay  = i < visible.length - 1 && dayFromIso(visible[i + 1].date) !== txDate;
             const isOpen   = openSwipeId === tx.id;
             return (
               <React.Fragment key={tx.id}>
               {isFirst && (
-                <div style={{ fontSize: 11, fontWeight: 500, color: "var(--color-text-lo)", fontFamily: "var(--font-body)", padding: i === 0 ? "2px 0 6px" : "14px 0 6px" }}>
-                  {dateLabel(txDate)}
-                </div>
+                <DayHeader
+                  day={txDate}
+                  label={dateLabel(txDate)}
+                  total={fmt(dayTotals.get(txDate)?.total ?? 0)}
+                  count={dayTotals.get(txDate)?.count ?? 0}
+                  first={i === 0}
+                />
               )}
               <div style={{ position: "relative", overflow: "hidden",
-                borderBottom: isLast ? "none" : "1px solid var(--color-border)" }}>
+                borderBottom: isLast || endsDay ? "none" : "1px solid var(--color-border)" }}>
 
                 {/* Swipe reveal — DELETE only (full width). Row tap = edit. */}
                 <div style={{ position: "absolute", right: 0, top: 0, bottom: 0, width: 80, display: "flex" }}>
