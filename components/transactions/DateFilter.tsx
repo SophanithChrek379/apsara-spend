@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import { CalendarDays, X } from "lucide-react";
+import { CalendarDays, Clock, X } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
@@ -10,7 +10,7 @@ import {
   Sheet, SheetClose, SheetContent, SheetDescription, SheetTitle,
 } from "@/components/ui/sheet";
 import { OverlayPickerField } from "@/components/transactions/OverlayPickerField";
-import { formatDisplayDate } from "@/lib/calendar-day";
+import { formatDisplayDate, formatTimeOfDay } from "@/lib/calendar-day";
 import { formatRange, monthBounds, thisWeekInMonth, type DayRange } from "@/lib/date-range";
 import { cn } from "@/lib/utils";
 
@@ -64,15 +64,17 @@ export function DateFilterFab({
 
   const label = formatRange(range);
   return (
-    <div className={cn(shell, "flex h-12 items-center border-primary pr-1 pl-1.5")}>
+    // Capped to the screen: a range with times ("10 Oct 08:00PM – 12 Oct
+    // 09:00AM") would otherwise run off a 360px phone; the label truncates.
+    <div className={cn(shell, "flex h-12 max-w-[calc(100vw-2.5rem)] items-center border-primary pr-1 pl-1.5")}>
       <Button
         variant="ghost"
         onClick={onOpen}
         aria-label={`Date filter: ${label}. Change`}
-        className="h-10 rounded-full px-3 font-numeric text-[13px] font-semibold text-primary tabular-nums hover:bg-primary/10 hover:text-primary"
+        className="h-10 min-w-0 shrink rounded-full px-3 font-numeric text-[13px] font-semibold text-primary tabular-nums hover:bg-primary/10 hover:text-primary"
       >
         <CalendarDays className="size-4" />
-        {label}
+        <span className="truncate">{label}</span>
       </Button>
       <Button
         variant="ghost"
@@ -108,12 +110,19 @@ export function DateFilterSheet({
   // Draft choices live only while the sheet is open. Re-seeded from the
   // applied filter each time it opens (the adjust-state-during-render
   // pattern, not an effect), so closing without Apply discards the draft.
-  const seed = (): { mode: Mode; from: string; to: string } =>
-    !value              ? { mode: "default", from: "", to: "" }
-    : value.mode === "week" ? { mode: week ? "week" : "default", from: "", to: "" }
-    : { mode: "custom", from: value.range.from, to: value.range.to };
+  // Times are optional — blank means the start / end of that day.
+  type Draft = { mode: Mode; from: string; to: string; fromTime: string; toTime: string };
+  const blank = { from: "", to: "", fromTime: "", toTime: "" };
+  const seed = (): Draft =>
+    !value              ? { mode: "default", ...blank }
+    : value.mode === "week" ? { mode: week ? "week" : "default", ...blank }
+    : {
+        mode: "custom",
+        from: value.range.from, to: value.range.to,
+        fromTime: value.range.fromTime ?? "", toTime: value.range.toTime ?? "",
+      };
 
-  const [draft, setDraft] = React.useState(seed);
+  const [draft, setDraft] = React.useState<Draft>(seed);
   const [wasOpen, setWasOpen] = React.useState(open);
   if (open !== wasOpen) {
     setWasOpen(open);
@@ -123,29 +132,39 @@ export function DateFilterSheet({
   // iOS Safari doesn't reliably enforce min/max inside its date wheel, so a
   // pick outside the month is clamped back into it here. A start after the
   // end (or the reverse) drags the other bound along instead of raising an
-  // error — the range stays valid by construction.
+  // error — the range stays valid by construction. Times follow the same
+  // rule, but only matter when both ends land on the same day.
   const clamp = (day: string) =>
     !day ? "" : day < bounds.from ? bounds.from : day > bounds.to ? bounds.to : day;
-  const setFrom = (v: string) => setDraft((d) => {
-    const from = clamp(v);
-    return { ...d, from, to: d.to && from > d.to ? from : d.to };
-  });
-  const setTo = (v: string) => setDraft((d) => {
-    const to = clamp(v);
-    return { ...d, to, from: d.from && to < d.from ? to : d.from };
-  });
+  const order = (d: Draft, moved: "from" | "to"): Draft => {
+    if (d.from && d.to && d.from > d.to) d = moved === "from" ? { ...d, to: d.from } : { ...d, from: d.to };
+    if (d.from && d.from === d.to && d.fromTime && d.toTime && d.fromTime > d.toTime)
+      d = moved === "from" ? { ...d, toTime: d.fromTime } : { ...d, fromTime: d.toTime };
+    return d;
+  };
+  const setField = (key: "from" | "to" | "fromTime" | "toTime") => (v: string) =>
+    setDraft((d) => order(
+      { ...d, [key]: key === "from" || key === "to" ? clamp(v) : v },
+      key.startsWith("from") ? "from" : "to",
+    ));
 
   const customValid = draft.from !== "" && draft.to !== "";
   const canApply =
     draft.mode === "week" ? week !== null
     : draft.mode === "custom" ? customValid
     : value !== null; // Default only "applies" if it changes something
-  const canReset = value !== null || draft.mode !== "default";
 
   const apply = () => {
     if (draft.mode === "default") onReset();
     else if (draft.mode === "week") onApply({ mode: "week" });
-    else onApply({ mode: "custom", range: { from: draft.from, to: draft.to } });
+    else onApply({
+      mode: "custom",
+      range: {
+        from: draft.from, to: draft.to,
+        ...(draft.fromTime && { fromTime: draft.fromTime }),
+        ...(draft.toTime && { toTime: draft.toTime }),
+      },
+    });
   };
 
   // Type scale and spacing copied from the Add Expense sheet so the two read
@@ -158,11 +177,19 @@ export function DateFilterSheet({
       <SheetContent
         side="bottom"
         showCloseButton={false}
+        // Motion and surface copied from EntryModal (the Add Expense sheet):
+        // the same 90% ink scrim fading over 300ms, a border-mid hairline,
+        // and a full-height rise on mobile / a small scale-in centred dialog
+        // from 768px. Its framer spring is approximated by `ease-sheet`.
+        overlayClassName="bg-scrim data-[state=open]:duration-300 data-[state=closed]:duration-300"
         className={cn(
-          "mx-auto w-full max-w-[480px] gap-0 rounded-t-[24px] border-border bg-card px-6 pt-7 font-sans",
+          "mx-auto w-full max-w-[480px] gap-0 rounded-t-[24px] border border-b-0 border-input bg-card px-6 pt-7 font-sans shadow-none",
           "pb-[calc(env(safe-area-inset-bottom)+2.75rem)]",
-          "md:inset-y-0 md:my-auto md:h-fit md:rounded-[24px] md:border md:pb-7",
-          "md:data-[state=open]:slide-in-from-bottom-4 md:data-[state=closed]:slide-out-to-bottom-4",
+          "ease-sheet data-[state=open]:duration-[420ms] data-[state=closed]:duration-300",
+          "md:inset-y-0 md:my-auto md:h-fit md:rounded-[20px] md:border-b md:pb-7",
+          "md:data-[state=open]:slide-in-from-bottom-3 md:data-[state=closed]:slide-out-to-bottom-2",
+          "md:data-[state=open]:fade-in-0 md:data-[state=closed]:fade-out-0",
+          "md:data-[state=open]:zoom-in-95 md:data-[state=closed]:zoom-out-95",
         )}
       >
         <div aria-hidden className="mx-auto mb-6 h-1 w-10 rounded-full bg-input md:hidden" />
@@ -212,53 +239,57 @@ export function DateFilterSheet({
           </Label>
         </RadioGroup>
 
-        {/* The same picker the Add Expense sheet uses for its date, in the
-            same 2-up grid — see OverlayPickerField for why it isn't a plain
-            <input type="date"> (iOS renders those blank and mis-sized). */}
+        {/* The same date + time pickers the Add Expense sheet uses, in the
+            same 2-up grid and format — one row per end of the range. See
+            OverlayPickerField for why they aren't plain <input type="date">
+            (iOS renders those blank and mis-sized). */}
         {draft.mode === "custom" && (
-          <div className="mt-2 grid grid-cols-2 gap-3 animate-in fade-in slide-in-from-top-1 duration-200">
-            <OverlayPickerField
-              type="date"
-              value={draft.from}
-              onChange={setFrom}
-              display={formatDisplayDate(draft.from)}
-              placeholder="Start date"
-              icon={CalendarDays}
-              min={bounds.from}
-              max={bounds.to}
-              aria-label="Start date"
-            />
-            <OverlayPickerField
-              type="date"
-              value={draft.to}
-              onChange={setTo}
-              display={formatDisplayDate(draft.to)}
-              placeholder="End date"
-              icon={CalendarDays}
-              min={draft.from || bounds.from}
-              max={bounds.to}
-              aria-label="End date"
-            />
+          <div className="mt-2 flex flex-col gap-3 animate-in fade-in slide-in-from-top-1 duration-200">
+            {([
+              { end: "from", label: "Start", min: bounds.from },
+              { end: "to",   label: "End",   min: draft.from || bounds.from },
+            ] as const).map(({ end, label, min }) => {
+              const day = draft[end], time = draft[`${end}Time`];
+              return (
+                <div key={end} role="group" aria-label={label}>
+                  <p className="mb-1.5 text-[13px] font-medium text-muted-foreground">{label}</p>
+                  <div className="grid grid-cols-2 gap-3">
+                    <OverlayPickerField
+                      type="date"
+                      value={day}
+                      onChange={setField(end)}
+                      display={formatDisplayDate(day)}
+                      placeholder={`${label} date`}
+                      icon={CalendarDays}
+                      min={min}
+                      max={bounds.to}
+                      aria-label={`${label} date`}
+                    />
+                    <OverlayPickerField
+                      type="time"
+                      value={time}
+                      onChange={setField(`${end}Time`)}
+                      display={formatTimeOfDay(time)}
+                      placeholder="Any time"
+                      icon={Clock}
+                      aria-label={`${label} time`}
+                    />
+                  </div>
+                </div>
+              );
+            })}
           </div>
         )}
 
-        <div className="mt-6 grid grid-cols-[auto_1fr] gap-3">
-          <Button
-            variant="outline"
-            onClick={onReset}
-            disabled={!canReset}
-            className="h-[52px] rounded-[14px] px-6 text-base font-semibold"
-          >
-            Reset
-          </Button>
-          <Button
-            onClick={apply}
-            disabled={!canApply}
-            className="h-[52px] rounded-[14px] text-base font-bold"
-          >
-            Apply
-          </Button>
-        </div>
+        {/* One action, like Add Expense. Clearing is "Default" + Apply here,
+            or the ✕ on the active filter pill without opening the sheet. */}
+        <Button
+          onClick={apply}
+          disabled={!canApply}
+          className="mt-6 h-[52px] w-full rounded-[14px] text-base font-bold"
+        >
+          Apply
+        </Button>
       </SheetContent>
     </Sheet>
   );

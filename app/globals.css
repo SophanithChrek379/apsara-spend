@@ -62,6 +62,14 @@
   /* Decorative only — dividers, zero values, empty-state glyphs. Below AA on
      purpose, so never use it for text that has to be read. */
   --color-ghost:               var(--ui-ghost);
+  /* The page dim behind a modal — the same near-opaque ink EntryModal paints
+     in page.tsx, so every sheet blacks out the page to the same depth. */
+  --color-scrim:               var(--ui-scrim);
+
+  /* Ease-out-quint. Stands in for EntryModal's framer spring (damping 28,
+     stiffness 300) on Radix sheets, which animate in CSS: fast off the mark,
+     long soft landing, no visible overshoot. */
+  --ease-sheet: cubic-bezier(0.22, 1, 0.36, 1);
 
   --color-chart-1: var(--ui-chart-1);
   --color-chart-2: var(--ui-chart-2);
@@ -109,6 +117,7 @@
   --ui-input:                var(--color-border-mid, #1e2a38);
   --ui-ring:                 var(--accent, #fbbf24);
   --ui-ghost:                var(--color-text-ghost, #475569);
+  --ui-scrim:                rgb(5 7 12 / 0.9);
 
   /* Category colours from page.tsx, in the order they appear there. */
   --ui-chart-1: #fb923c;
@@ -136,6 +145,7 @@ html[data-theme="light"] {
   --ui-border:               var(--color-border, #e2e8f0);
   --ui-input:                var(--color-border-mid, #cbd5e1);
   --ui-ghost:                var(--color-text-ghost, #94a3b8);
+  --ui-scrim:                rgb(5 7 12 / 0.9);
 }
 
 @layer base {
