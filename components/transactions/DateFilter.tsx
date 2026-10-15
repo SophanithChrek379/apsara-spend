@@ -4,12 +4,13 @@ import * as React from "react";
 import { CalendarDays, X } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import {
-  Sheet, SheetContent, SheetDescription, SheetFooter, SheetTitle,
+  Sheet, SheetClose, SheetContent, SheetDescription, SheetTitle,
 } from "@/components/ui/sheet";
+import { OverlayPickerField } from "@/components/transactions/OverlayPickerField";
+import { formatDisplayDate } from "@/lib/calendar-day";
 import { formatRange, monthBounds, thisWeekInMonth, type DayRange } from "@/lib/date-range";
 import { cn } from "@/lib/utils";
 
@@ -119,8 +120,22 @@ export function DateFilterSheet({
     if (open) setDraft(seed());
   }
 
-  const customValid =
-    draft.from !== "" && draft.to !== "" && draft.from <= draft.to;
+  // iOS Safari doesn't reliably enforce min/max inside its date wheel, so a
+  // pick outside the month is clamped back into it here. A start after the
+  // end (or the reverse) drags the other bound along instead of raising an
+  // error — the range stays valid by construction.
+  const clamp = (day: string) =>
+    !day ? "" : day < bounds.from ? bounds.from : day > bounds.to ? bounds.to : day;
+  const setFrom = (v: string) => setDraft((d) => {
+    const from = clamp(v);
+    return { ...d, from, to: d.to && from > d.to ? from : d.to };
+  });
+  const setTo = (v: string) => setDraft((d) => {
+    const to = clamp(v);
+    return { ...d, to, from: d.from && to < d.from ? to : d.from };
+  });
+
+  const customValid = draft.from !== "" && draft.to !== "";
   const canApply =
     draft.mode === "week" ? week !== null
     : draft.mode === "custom" ? customValid
@@ -133,7 +148,10 @@ export function DateFilterSheet({
     else onApply({ mode: "custom", range: { from: draft.from, to: draft.to } });
   };
 
-  const option = "flex min-h-11 items-center gap-3 text-sm font-medium text-foreground";
+  // Type scale and spacing copied from the Add Expense sheet so the two read
+  // as one family: 24px gutters, 22px headline title with a 36px close
+  // button, 48px rows and fields at 16px, a 52px primary action.
+  const option = "flex min-h-12 cursor-pointer items-center gap-3 text-base font-medium text-foreground";
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
@@ -141,98 +159,106 @@ export function DateFilterSheet({
         side="bottom"
         showCloseButton={false}
         className={cn(
-          "mx-auto w-full max-w-[480px] gap-0 rounded-t-[22px] border-border bg-card px-5 pt-3 font-sans",
-          "pb-[calc(env(safe-area-inset-bottom)+1.25rem)]",
-          "md:inset-y-0 md:my-auto md:h-fit md:rounded-[22px] md:border md:pb-5",
+          "mx-auto w-full max-w-[480px] gap-0 rounded-t-[24px] border-border bg-card px-6 pt-7 font-sans",
+          "pb-[calc(env(safe-area-inset-bottom)+2.75rem)]",
+          "md:inset-y-0 md:my-auto md:h-fit md:rounded-[24px] md:border md:pb-7",
           "md:data-[state=open]:slide-in-from-bottom-4 md:data-[state=closed]:slide-out-to-bottom-4",
         )}
       >
-        <div aria-hidden className="mx-auto mb-4 h-1 w-10 rounded-full bg-border md:hidden" />
+        <div aria-hidden className="mx-auto mb-6 h-1 w-10 rounded-full bg-input md:hidden" />
 
-        <SheetTitle className="font-display text-lg font-bold text-foreground">
-          Filter by date
-        </SheetTitle>
-        <SheetDescription className="mt-0.5 text-xs text-muted-foreground">
+        <div className="mb-4 flex items-center justify-between gap-3">
+          <SheetTitle className="font-display text-[22px] leading-[1.2] font-semibold tracking-[-0.01em] text-foreground">
+            Filter by date
+          </SheetTitle>
+          <SheetClose asChild>
+            <Button
+              variant="secondary"
+              size="icon"
+              aria-label="Close"
+              className="size-9 shrink-0 rounded-[9px] text-muted-foreground"
+            >
+              <X className="size-[18px]" strokeWidth={2} />
+            </Button>
+          </SheetClose>
+        </div>
+        <SheetDescription className="sr-only">
           Narrow the {monthName} list. Your monthly total stays the same.
         </SheetDescription>
 
         <RadioGroup
           value={draft.mode}
           onValueChange={(m) => setDraft((d) => ({ ...d, mode: m as Mode }))}
-          className="mt-4 gap-1"
+          className="gap-0"
         >
           <Label className={option}>
-            <RadioGroupItem value="default" />
+            <RadioGroupItem value="default" className="size-5" />
             Default
           </Label>
 
           {week && (
             <Label className={option}>
-              <RadioGroupItem value="week" />
+              <RadioGroupItem value="week" className="size-5" />
               This week
-              <span className="ml-auto font-numeric text-xs font-normal text-muted-foreground tabular-nums">
+              <span className="ml-auto font-numeric text-sm font-normal text-muted-foreground tabular-nums">
                 {formatRange(week)}
               </span>
             </Label>
           )}
 
           <Label className={option}>
-            <RadioGroupItem value="custom" />
+            <RadioGroupItem value="custom" className="size-5" />
             Custom range
           </Label>
         </RadioGroup>
 
+        {/* The same picker the Add Expense sheet uses for its date, in the
+            same 2-up grid — see OverlayPickerField for why it isn't a plain
+            <input type="date"> (iOS renders those blank and mis-sized). */}
         {draft.mode === "custom" && (
-          <div className="mt-2 grid grid-cols-2 gap-3 pl-7 animate-in fade-in slide-in-from-top-1 duration-200">
-            <div className="grid gap-1.5">
-              <Label htmlFor="date-filter-from" className="text-xs text-muted-foreground">Start</Label>
-              <Input
-                id="date-filter-from"
-                type="date"
-                min={bounds.from}
-                max={draft.to || bounds.to}
-                value={draft.from}
-                onChange={(e) => setDraft((d) => ({ ...d, from: e.target.value }))}
-                className="h-11 font-numeric tabular-nums"
-              />
-            </div>
-            <div className="grid gap-1.5">
-              <Label htmlFor="date-filter-to" className="text-xs text-muted-foreground">End</Label>
-              <Input
-                id="date-filter-to"
-                type="date"
-                min={draft.from || bounds.from}
-                max={bounds.to}
-                value={draft.to}
-                onChange={(e) => setDraft((d) => ({ ...d, to: e.target.value }))}
-                className="h-11 font-numeric tabular-nums"
-              />
-            </div>
-            {draft.from && draft.to && draft.from > draft.to && (
-              <p role="alert" className="col-span-2 text-xs text-destructive">
-                End date must be on or after the start date.
-              </p>
-            )}
+          <div className="mt-2 grid grid-cols-2 gap-3 animate-in fade-in slide-in-from-top-1 duration-200">
+            <OverlayPickerField
+              type="date"
+              value={draft.from}
+              onChange={setFrom}
+              display={formatDisplayDate(draft.from)}
+              placeholder="Start date"
+              icon={CalendarDays}
+              min={bounds.from}
+              max={bounds.to}
+              aria-label="Start date"
+            />
+            <OverlayPickerField
+              type="date"
+              value={draft.to}
+              onChange={setTo}
+              display={formatDisplayDate(draft.to)}
+              placeholder="End date"
+              icon={CalendarDays}
+              min={draft.from || bounds.from}
+              max={bounds.to}
+              aria-label="End date"
+            />
           </div>
         )}
 
-        <SheetFooter className="mt-6 grid grid-cols-[auto_1fr] gap-3 p-0">
+        <div className="mt-6 grid grid-cols-[auto_1fr] gap-3">
           <Button
             variant="outline"
             onClick={onReset}
             disabled={!canReset}
-            className="h-11 rounded-[12px] px-5"
+            className="h-[52px] rounded-[14px] px-6 text-base font-semibold"
           >
             Reset
           </Button>
           <Button
             onClick={apply}
             disabled={!canApply}
-            className="h-11 rounded-[12px] font-semibold"
+            className="h-[52px] rounded-[14px] text-base font-bold"
           >
             Apply
           </Button>
-        </SheetFooter>
+        </div>
       </SheetContent>
     </Sheet>
   );

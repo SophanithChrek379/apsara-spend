@@ -11,6 +11,7 @@ interface OverlayPickerFieldProps {
   display: string;
   placeholder: string;
   icon: LucideIcon;
+  min?: string;
   max?: string;
   className?: string;
   "aria-label"?: string;
@@ -30,7 +31,7 @@ interface OverlayPickerFieldProps {
  */
 export const OverlayPickerField = forwardRef<HTMLInputElement, OverlayPickerFieldProps>(
   function OverlayPickerField(
-    { type, value, onChange, display, placeholder, icon: Icon, max, className, ...aria },
+    { type, value, onChange, display, placeholder, icon: Icon, min, max, className, ...aria },
     ref,
   ) {
     const [focused, setFocused] = useState(false);
@@ -53,6 +54,7 @@ export const OverlayPickerField = forwardRef<HTMLInputElement, OverlayPickerFiel
           ref={ref}
           type={type}
           value={value}
+          min={min}
           max={max}
           onChange={(e) => onChange(e.target.value)}
           onFocus={() => setFocused(true)}
