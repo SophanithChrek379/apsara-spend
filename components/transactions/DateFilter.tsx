@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import { CalendarDays, Clock, X } from "lucide-react";
+import { CalendarDays, X } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
@@ -10,20 +10,20 @@ import {
   Sheet, SheetClose, SheetContent, SheetDescription, SheetTitle,
 } from "@/components/ui/sheet";
 import { OverlayPickerField } from "@/components/transactions/OverlayPickerField";
-import { formatDisplayDate, formatTimeOfDay } from "@/lib/calendar-day";
+import { formatDisplayDate } from "@/lib/calendar-day";
 import { formatRange, monthBounds, thisWeekInMonth, type DayRange } from "@/lib/date-range";
 import { cn } from "@/lib/utils";
 
 /**
- * A narrowing of the month on screen. `null` everywhere means "Default" — no
- * date filter, the whole month. "week" is stored as a mode rather than a range
+ * A narrowing of the month on screen. `null` everywhere means no date filter
+ * — the whole month; it is cleared with the ✕ on the active pill. "week" is stored as a mode rather than a range
  * so it is recomputed from today rather than frozen at the moment it was picked.
  */
 export type DateFilter = { mode: "week" } | { mode: "custom"; range: DayRange };
 
-type Mode = "default" | "week" | "custom";
+type Mode = "week" | "custom";
 
-/** The days a filter actually covers this month, or null for Default/unusable. */
+/** The days a filter actually covers this month, or null for none/unusable. */
 export function resolveDateFilter(
   filter: DateFilter | null, today: string, monthKey: string,
 ): DayRange | null {
@@ -64,8 +64,7 @@ export function DateFilterFab({
 
   const label = formatRange(range);
   return (
-    // Capped to the screen: a range with times ("10 Oct 08:00PM – 12 Oct
-    // 09:00AM") would otherwise run off a 360px phone; the label truncates.
+    // Capped to the screen so a long label truncates rather than overflows.
     <div className={cn(shell, "flex h-12 max-w-[calc(100vw-2.5rem)] items-center border-primary pr-1 pl-1.5")}>
       <Button
         variant="ghost"
@@ -92,7 +91,7 @@ export function DateFilterFab({
 // ── Bottom sheet ───────────────────────────────────────────────────────────
 
 export function DateFilterSheet({
-  open, onOpenChange, value, today, monthKey, monthName, onApply, onReset,
+  open, onOpenChange, value, today, monthKey, monthName, onApply,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -102,7 +101,6 @@ export function DateFilterSheet({
   /** "October" — for the description line. */
   monthName: string;
   onApply: (filter: DateFilter) => void;
-  onReset: () => void;
 }) {
   const bounds = monthBounds(monthKey);
   const week   = thisWeekInMonth(today, monthKey);
@@ -110,17 +108,13 @@ export function DateFilterSheet({
   // Draft choices live only while the sheet is open. Re-seeded from the
   // applied filter each time it opens (the adjust-state-during-render
   // pattern, not an effect), so closing without Apply discards the draft.
-  // Times are optional — blank means the start / end of that day.
-  type Draft = { mode: Mode; from: string; to: string; fromTime: string; toTime: string };
-  const blank = { from: "", to: "", fromTime: "", toTime: "" };
+  // With no filter applied it opens on "This week" (or Custom range when the week
+  // falls outside the month on screen), so Apply always does something.
+  type Draft = { mode: Mode; from: string; to: string };
+  const blank = { from: "", to: "" };
   const seed = (): Draft =>
-    !value              ? { mode: "default", ...blank }
-    : value.mode === "week" ? { mode: week ? "week" : "default", ...blank }
-    : {
-        mode: "custom",
-        from: value.range.from, to: value.range.to,
-        fromTime: value.range.fromTime ?? "", toTime: value.range.toTime ?? "",
-      };
+    !value || value.mode === "week" ? { mode: week ? "week" : "custom", ...blank }
+    : { mode: "custom", from: value.range.from, to: value.range.to };
 
   const [draft, setDraft] = React.useState<Draft>(seed);
   const [wasOpen, setWasOpen] = React.useState(open);
@@ -132,39 +126,22 @@ export function DateFilterSheet({
   // iOS Safari doesn't reliably enforce min/max inside its date wheel, so a
   // pick outside the month is clamped back into it here. A start after the
   // end (or the reverse) drags the other bound along instead of raising an
-  // error — the range stays valid by construction. Times follow the same
-  // rule, but only matter when both ends land on the same day.
+  // error — the range stays valid by construction.
   const clamp = (day: string) =>
     !day ? "" : day < bounds.from ? bounds.from : day > bounds.to ? bounds.to : day;
   const order = (d: Draft, moved: "from" | "to"): Draft => {
     if (d.from && d.to && d.from > d.to) d = moved === "from" ? { ...d, to: d.from } : { ...d, from: d.to };
-    if (d.from && d.from === d.to && d.fromTime && d.toTime && d.fromTime > d.toTime)
-      d = moved === "from" ? { ...d, toTime: d.fromTime } : { ...d, fromTime: d.toTime };
     return d;
   };
-  const setField = (key: "from" | "to" | "fromTime" | "toTime") => (v: string) =>
-    setDraft((d) => order(
-      { ...d, [key]: key === "from" || key === "to" ? clamp(v) : v },
-      key.startsWith("from") ? "from" : "to",
-    ));
+  const setField = (key: "from" | "to") => (v: string) =>
+    setDraft((d) => order({ ...d, [key]: clamp(v) }, key));
 
   const customValid = draft.from !== "" && draft.to !== "";
-  const canApply =
-    draft.mode === "week" ? week !== null
-    : draft.mode === "custom" ? customValid
-    : value !== null; // Default only "applies" if it changes something
+  const canApply = draft.mode === "week" ? week !== null : customValid;
 
   const apply = () => {
-    if (draft.mode === "default") onReset();
-    else if (draft.mode === "week") onApply({ mode: "week" });
-    else onApply({
-      mode: "custom",
-      range: {
-        from: draft.from, to: draft.to,
-        ...(draft.fromTime && { fromTime: draft.fromTime }),
-        ...(draft.toTime && { toTime: draft.toTime }),
-      },
-    });
+    if (draft.mode === "week") onApply({ mode: "week" });
+    else onApply({ mode: "custom", range: { from: draft.from, to: draft.to } });
   };
 
   // Type scale and spacing copied from the Add Expense sheet so the two read
@@ -218,11 +195,6 @@ export function DateFilterSheet({
           onValueChange={(m) => setDraft((d) => ({ ...d, mode: m as Mode }))}
           className="gap-0"
         >
-          <Label className={option}>
-            <RadioGroupItem value="default" className="size-5" />
-            Default
-          </Label>
-
           {week && (
             <Label className={option}>
               <RadioGroupItem value="week" className="size-5" />
@@ -239,50 +211,40 @@ export function DateFilterSheet({
           </Label>
         </RadioGroup>
 
-        {/* The same date + time pickers the Add Expense sheet uses, in the
-            same 2-up grid and format — one row per end of the range. See
-            OverlayPickerField for why they aren't plain <input type="date">
-            (iOS renders those blank and mis-sized). */}
+        {/* The same date picker the Add Expense sheet uses, Start and End
+            side by side in its 2-up grid. Whole days: Start includes that day from 12:00AM, End
+            includes it through 11:59PM. See OverlayPickerField for why these
+            aren't plain <input type="date"> (iOS renders those blank and
+            mis-sized). */}
         {draft.mode === "custom" && (
-          <div className="mt-2 flex flex-col gap-3 animate-in fade-in slide-in-from-top-1 duration-200">
+          <div className="mt-2 grid grid-cols-2 gap-3 animate-in fade-in slide-in-from-top-1 duration-200">
             {([
               { end: "from", label: "Start", min: bounds.from },
               { end: "to",   label: "End",   min: draft.from || bounds.from },
             ] as const).map(({ end, label, min }) => {
-              const day = draft[end], time = draft[`${end}Time`];
+              const day = draft[end];
               return (
-                <div key={end} role="group" aria-label={label}>
+                <div key={end}>
                   <p className="mb-1.5 text-[13px] font-medium text-muted-foreground">{label}</p>
-                  <div className="grid grid-cols-2 gap-3">
-                    <OverlayPickerField
-                      type="date"
-                      value={day}
-                      onChange={setField(end)}
-                      display={formatDisplayDate(day)}
-                      placeholder={`${label} date`}
-                      icon={CalendarDays}
-                      min={min}
-                      max={bounds.to}
-                      aria-label={`${label} date`}
-                    />
-                    <OverlayPickerField
-                      type="time"
-                      value={time}
-                      onChange={setField(`${end}Time`)}
-                      display={formatTimeOfDay(time)}
-                      placeholder="Any time"
-                      icon={Clock}
-                      aria-label={`${label} time`}
-                    />
-                  </div>
+                  <OverlayPickerField
+                    type="date"
+                    value={day}
+                    onChange={setField(end)}
+                    display={formatDisplayDate(day)}
+                    placeholder={`${label} date`}
+                    icon={CalendarDays}
+                    min={min}
+                    max={bounds.to}
+                    aria-label={`${label} date`}
+                  />
                 </div>
               );
             })}
           </div>
         )}
 
-        {/* One action, like Add Expense. Clearing is "Default" + Apply here,
-            or the ✕ on the active filter pill without opening the sheet. */}
+        {/* One action, like Add Expense. Clearing is the ✕ on the active
+            filter pill, without opening the sheet. */}
         <Button
           onClick={apply}
           disabled={!canApply}

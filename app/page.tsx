@@ -16,7 +16,7 @@ import {
 import type { Currency, CategoryId, Transaction, AppData } from "@/lib/types";
 import { useSyncedLedger, newTransactionId, type SyncStatus, type SyncResult } from "@/lib/ledger/useSyncedLedger";
 import { downloadBackupJson, downloadCsv } from "@/lib/ledger/export";
-import { isoFromDay, dayFromIso, monthKeyFromIso, todayDay, nowTimeOfDay, formatDisplayDate, formatDisplayTime, formatTimeOfDay, clockMinutes } from "@/lib/calendar-day";
+import { isoFromDay, dayFromIso, monthKeyFromIso, todayDay, nowTimeOfDay, formatDisplayDate, formatDisplayTime, formatTimeOfDay } from "@/lib/calendar-day";
 import { buildReport, type ReportPeriod } from "@/lib/report";
 import { makeByNewest } from "@/lib/tx-order";
 import { CATEGORIES, MISC_CATEGORY } from "@/lib/categories";
@@ -24,7 +24,7 @@ import { ReportSheet } from "@/components/report/ReportSheet";
 import { OverlayPickerField } from "@/components/transactions/OverlayPickerField";
 import { DayHeader } from "@/components/transactions/DayHeader";
 import { DateFilterFab, DateFilterSheet, RangeTotal, resolveDateFilter, type DateFilter } from "@/components/transactions/DateFilter";
-import { formatRange, inRange, timeFromMinutes } from "@/lib/date-range";
+import { formatRange, inRange } from "@/lib/date-range";
 import { AccountSheet, type AuthMode } from "@/components/account/AccountSheet";
 import { GoogleMark } from "@/components/account/GoogleMark";
 import {
@@ -365,13 +365,7 @@ function MonthPicker({ current, onSelect, onClose }: {
   const { year: curYear } = parseMonthKey(current);
   const [pickerYear, setPickerYear] = useState(curYear);
   const today = todayMonthKey();
-  // Only the current month can be opened, so the picker never has a reason to
-  // leave today's year — both year arrows stay disabled while they point away
-  // from it, and stepping back to it is still possible if the picker somehow
-  // opens on another year.
-  const todayYear = parseMonthKey(today).year;
-  const atMin = pickerYear <= todayYear;
-  const atMax = pickerYear >= todayYear;
+  const atMax = pickerYear >= new Date().getFullYear();
   const pickerRef = useRef<HTMLDivElement>(null);
   useFocusTrap(pickerRef, true);
 
@@ -390,13 +384,8 @@ function MonthPicker({ current, onSelect, onClose }: {
         onClick={(e) => e.stopPropagation()}
       >
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}>
-          <button aria-label="Previous year" onClick={() => setPickerYear((y) => y - 1)} disabled={atMin}
-            style={{
-              background: "none", border: "none", borderRadius: 10, padding: 10,
-              cursor: atMin ? "default" : "pointer",
-              display: "flex", alignItems: "center", justifyContent: "center",
-              opacity: atMin ? 0.3 : 1, transition: "opacity 0.2s",
-            }}>
+          <button aria-label="Previous year" onClick={() => setPickerYear((y) => y - 1)}
+            style={{ background: "none", border: "none", borderRadius: 10, padding: 10, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}>
             <ChevronLeft className="icon-nav" color="var(--color-text-lo)" strokeWidth={2} />
           </button>
           <span style={{ fontSize: 20, fontWeight: 600, color: "var(--color-text-hi)", letterSpacing: "-0.01em", fontFamily: "var(--font-headline)" }}>{pickerYear}</span>
@@ -413,19 +402,18 @@ function MonthPicker({ current, onSelect, onClose }: {
         <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 8 }}>
           {MONTHS.map((m, i) => {
             const key = toMonthKey(pickerYear, i + 1);
-            // Every month but the current one is locked — past ones included.
-            const isSelected = key === current, isToday = key === today, isLocked = key !== today;
+            const isSelected = key === current, isToday = key === today, isFuture = key > today;
             return (
-              <button key={m} disabled={isLocked} onClick={() => { onSelect(key); onClose(); }}
+              <button key={m} disabled={isFuture} onClick={() => { onSelect(key); onClose(); }}
                 style={{
                   padding: "11px 4px", borderRadius: 12, position: "relative",
                   border: isSelected ? "2px solid var(--accent)" : "1px solid transparent",
                   background: isSelected ? "var(--accent-muted)" : isToday ? "var(--color-border)" : "transparent",
                   color: isSelected ? "var(--accent)" : "var(--color-text-mid)",
-                  opacity: isLocked ? 0.3 : 1,
+                  opacity: isFuture ? 0.3 : 1,
                   fontFamily: "var(--font-body)",
                   fontWeight: isSelected ? 600 : 400, fontSize: 13,
-                  cursor: isLocked ? "default" : "pointer",
+                  cursor: isFuture ? "default" : "pointer",
                   transition: "all 0.15s",
                 }}>
                 {m}
@@ -1323,21 +1311,15 @@ export default function ApsaraSpendPage() {
     localDateString(), selectedMonth,
   );
   const rangeFrom = dateRange?.from, rangeTo = dateRange?.to;
-  const rangeFromTime = dateRange?.fromTime, rangeToTime = dateRange?.toTime;
 
   // The month narrowed by the date filter. Feeds the list, its category chips
   // and the day/range totals — never the Total Spend card or the budget,
   // which are monthly by definition.
   const rangeTxs = useMemo(() =>
     rangeFrom && rangeTo
-      ? monthTxs.filter((t) => inRange(
-          dayFromIso(t.date),
-          { from: rangeFrom, to: rangeTo, fromTime: rangeFromTime, toTime: rangeToTime },
-          // The time the row prints and sorts by — picked time, else created_at.
-          timeFromMinutes(clockMinutes(t.time, t.createdAt)),
-        ))
+      ? monthTxs.filter((t) => inRange(dayFromIso(t.date), { from: rangeFrom, to: rangeTo }))
       : monthTxs,
-    [monthTxs, rangeFrom, rangeTo, rangeFromTime, rangeToTime]
+    [monthTxs, rangeFrom, rangeTo]
   );
 
   // L1 — the filter actually in force, derived rather than stored.
@@ -1391,9 +1373,6 @@ export default function ApsaraSpendPage() {
 
   const { year, month } = parseMonthKey(selectedMonth);
   const isCurrentMonth  = selectedMonth === todayMonthKey();
-  // Month navigation is locked to the current month (see navigateMonth).
-  const canMonthBack    = shiftMonth(selectedMonth, -1) === todayMonthKey();
-  const canMonthForward = shiftMonth(selectedMonth,  1) === todayMonthKey();
   const hasData         = monthTxs.length > 0;
   const hasBreakdown    = categoryTotals.some((c) => c.total > 0);
 
@@ -1518,7 +1497,7 @@ export default function ApsaraSpendPage() {
   }, [openSwipeId]);
 
   // Reset visible count when month or filter changes so we always start at top
-  useEffect(() => { setVisibleCount(10); }, [selectedMonth, filterCategory, rangeFrom, rangeTo, rangeFromTime, rangeToTime]);
+  useEffect(() => { setVisibleCount(10); }, [selectedMonth, filterCategory, rangeFrom, rangeTo]);
 
   // Clear the stored filter once the month has actually changed, so coming back
   // to July later opens on All rather than resurrecting the filter that was on
@@ -1532,9 +1511,10 @@ export default function ApsaraSpendPage() {
 
   const navigateMonth = (delta: 1 | -1) => {
     const next = shiftMonth(selectedMonth, delta);
-    // Only the current month is browsable. The one move that still exists is
-    // back to it, if the tab was left open across a month boundary.
-    if (next !== todayMonthKey()) return;
+    if (delta === 1 && next > todayMonthKey()) {
+      showToast("No future months.", "info");
+      return;
+    }
     setSwipeDir(delta);
     setSelectedMonth(next);
     // No filter reset here — `filterCategory` is derived from selectedMonth, so
@@ -2652,7 +2632,11 @@ export default function ApsaraSpendPage() {
           userSelect: "none",
         }}
       >
-        <div className="main-scroll" style={{ position: "relative", zIndex: 1, paddingBottom: hasData ? "calc(224px + env(safe-area-inset-bottom))" : "calc(160px + env(safe-area-inset-bottom))" }}>
+        {/* Room for the two-button FAB stack only once it can render. Gated on
+            isLoaded like the FAB itself: `data` is read from the local cache on
+            the client's first frame but is empty on the server, so `hasData`
+            alone made this padding mismatch during hydration. */}
+        <div className="main-scroll" style={{ position: "relative", zIndex: 1, paddingBottom: isLoaded && hasData ? "calc(224px + env(safe-area-inset-bottom))" : "calc(160px + env(safe-area-inset-bottom))" }}>
 
           {/* ════ STICKY HEADER — app title + month navigation ════ */}
           <div className="sticky-header">
@@ -2702,13 +2686,8 @@ export default function ApsaraSpendPage() {
             </div>
           ) : (
           <div className="monthnav-pad" style={{ display: "flex", alignItems: "center", gap: 12 }}>
-            <button aria-label="Previous month" onClick={() => navigateMonth(-1)} disabled={!canMonthBack}
-              style={{
-                background: "none", border: "none", borderRadius: 10, padding: 12,
-                cursor: canMonthBack ? "pointer" : "default",
-                display: "flex", alignItems: "center", justifyContent: "center", minWidth: 44, minHeight: 44,
-                opacity: canMonthBack ? 1 : 0.25, transition: "opacity 0.2s",
-              }}>
+            <button aria-label="Previous month" onClick={() => navigateMonth(-1)}
+              style={{ background: "none", border: "none", borderRadius: 10, padding: 12, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", minWidth: 44, minHeight: 44 }}>
               <ChevronLeft className="icon-nav" color="var(--color-text-lo)" strokeWidth={2} />
             </button>
 
@@ -2735,15 +2714,15 @@ export default function ApsaraSpendPage() {
             </div>
 
             <button aria-label="Next month"
-              aria-description={canMonthForward ? undefined : "Only the current month is available"}
-              onClick={() => navigateMonth(1)} disabled={!canMonthForward}
+              aria-description={isCurrentMonth ? "Cannot navigate past current month" : undefined}
+              onClick={() => navigateMonth(1)} disabled={isCurrentMonth}
               style={{
                 background: "none", border: "none",
                 borderRadius: 10, padding: 12,
-                cursor: canMonthForward ? "pointer" : "default",
+                cursor: isCurrentMonth ? "default" : "pointer",
                 display: "flex", alignItems: "center", justifyContent: "center",
                 minWidth: 44, minHeight: 44,
-                opacity: canMonthForward ? 1 : 0.25,
+                opacity: isCurrentMonth ? 0.25 : 1,
                 transition: "opacity 0.2s",
               }}>
               <ChevronRight className="icon-nav" color="var(--color-text-lo)" strokeWidth={2} />
@@ -2755,12 +2734,12 @@ export default function ApsaraSpendPage() {
 
           {/* ════ SWIPEABLE DASHBOARD — horizontal drag navigates months ════ */}
           <motion.div
-            drag={canMonthBack || canMonthForward ? "x" : false}
+            drag="x"
             dragConstraints={{ left: 0, right: 0 }}
             dragElastic={0.12}
             onDragEnd={handleDragEnd}
             onClick={() => { openSwipeId && setOpenSwipeId(null); }}
-            style={{ touchAction: "pan-y", cursor: canMonthBack || canMonthForward ? "grab" : "auto" }}>
+            style={{ touchAction: "pan-y", cursor: "grab" }}>
             {/* No AnimatePresence here, deliberately — this subtree slides in on
                 a key change but never animates out.
 
@@ -2865,7 +2844,7 @@ export default function ApsaraSpendPage() {
 
               </motion.div>
 
-          {showSwipeHint && hasData && (canMonthBack || canMonthForward) && (
+          {showSwipeHint && hasData && (
           <div className="swipe-hint" style={{ textAlign: "center", marginTop: 14, fontSize: 11, color: "var(--color-text-ghost)", letterSpacing: "0.1em", fontFamily: "var(--font-body)" }}>
             ← SWIPE TO NAVIGATE MONTHS →
           </div>
@@ -2924,7 +2903,6 @@ export default function ApsaraSpendPage() {
           monthKey={selectedMonth}
           monthName={MONTH_FULL[parseMonthKey(selectedMonth).month - 1]}
           onApply={(filter) => { setDateFilter({ month: selectedMonth, filter }); setShowDateFilter(false); }}
-          onReset={() => { setDateFilter(null); setShowDateFilter(false); }}
         />
 
         {/* ════ MODALS ════ */}
